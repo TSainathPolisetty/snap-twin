@@ -1,4 +1,4 @@
-# SnapTwin-Q Technical Log
+# SnapTwin Technical Log
 
 ## Entry 01: Environment & ROS 2 Stack Setup
 **Date:** 2026-02-04
