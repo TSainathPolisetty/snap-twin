@@ -1,0 +1,22 @@
+# Bridge the pedestal pose
+- topic_name: "/model/pedestal/pose"
+  ros_type_name: "geometry_msgs/msg/PoseStamped"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS
+
+# Bridge the work table pose
+- topic_name: "/model/work_table/pose"
+  ros_type_name: "geometry_msgs/msg/PoseStamped"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS
+
+# Robot Arm Pose (for the root link)
+- topic_name: "/model/so101_arm/pose"
+  ros_type_name: "geometry_msgs/msg/PoseStamped"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS
+
+- topic_name: "/world/SnapTwin_Oracle_World/scene/info"
+  ros_type_name: "foxglove_msgs/msg/SceneUpdate"
+  gz_type_name: "gz.msgs.Scene"
+  direction: GZ_TO_ROS
