@@ -1,37 +1,29 @@
 #!/bin/bash
 
-# Define project path
-BASE_DIR="$HOME/demo/snap-twin/test-base"
+# --- Configuration Paths ---
+BASE_DIR="/home/ubuntu/demo/snap-twin/test-base"
+MODELS_DIR="/home/ubuntu/demo/snap-twin/simulation/models"
+XACRO_FILE="$BASE_DIR/scene_description.xacro"
+FINAL_URDF="$BASE_DIR/final_scene.urdf"
 
-# Start a new tmux session named 'digital_twin'
+# Start tmux session
 tmux new-session -d -s digital_twin
 
-# Pane 1: Gazebo Server
+# Pane 1: Gazebo Server (Physics)
 tmux send-keys -t digital_twin "gz sim -s -r $BASE_DIR/demo_world.sdf" C-m
 
-# Split for Pane 2: ROS-GZ Bridge
+# Pane 2: ROS-GZ Bridge (Joint Messaging)
 tmux split-window -h -t digital_twin
-tmux send-keys -t digital_twin "ros2 run ros_gz_bridge parameter_bridge '/world/demo_world/dynamic_pose/info@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V' --ros-args -r /world/demo_world/dynamic_pose/info:=/tf" C-m
+tmux send-keys -t digital_twin "ros2 run ros_gz_bridge parameter_bridge '/model/so101_arm/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model' --ros-args -r /model/so101_arm/joint_state:=/joint_states" C-m
 
-# Split for Pane 3: Foxglove Bridge
+# Pane 3: Process Xacro and Start Python Viz Server
+# 1. Run Xacro to merge the files
+# 2. Use sed to add 'package://SO101/' to mesh paths so the SDK can find them
+# 3. Start the visualization server
 tmux select-pane -t 0
 tmux split-window -v -t digital_twin
-tmux send-keys -t digital_twin "ros2 launch foxglove_bridge foxglove_bridge_launch.xml" C-m
+tmux send-keys -t digital_twin "xacro $XACRO_FILE > $FINAL_URDF && \
+sed -i 's|filename=\"assets/|filename=\"package://SO101/assets/|g' $FINAL_URDF && \
+python3 $BASE_DIR/viz_server.py" C-m
 
-# Split for Pane 4: Static TF Floor
-tmux select-pane -t 1
-tmux split-window -v -t digital_twin
-tmux send-keys -t digital_twin "ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 world floor" C-m
-
-# Split for Pane 5: Static TF Table
-tmux select-pane -t 2
-tmux split-window -v -t digital_twin
-tmux send-keys -t digital_twin "ros2 run tf2_ros static_transform_publisher 0 0 0.75 0 0 0 world table" C-m
-
-# Split for Pane 6: URDF Publisher
-tmux select-pane -t 3
-tmux split-window -v -t digital_twin
-tmux send-keys -t digital_twin "ros2 run robot_state_publisher robot_state_publisher --ros-args -p robot_description:=\"\$(cat $BASE_DIR/scene_description.urdf)\"" C-m
-
-# Attach to the session
 tmux attach-session -t digital_twin
