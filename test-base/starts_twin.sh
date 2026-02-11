@@ -1,28 +1,22 @@
 #!/bin/bash
 
-# --- Configuration Paths for Host ---
-BASE_DIR="/home/ubuntu/demo/snap-twin/test-base"
-VENV_PYTHON="/home/ubuntu/demo/snap-twin/host_venv/bin/python3"
-XACRO_FILE="$BASE_DIR/scene_description.xacro"
-FINAL_URDF="$BASE_DIR/final_scene.urdf"
+# 1. Kill any existing session to start fresh
+tmux kill-session -t twin 2>/dev/null
 
-# Start tmux session
-tmux new-session -d -s digital_twin
+# 2. Start a new session in the background
+# -d: detached, -s: session name, -n: initial window name
+tmux new-session -d -s twin -n "Servers"
 
-# Pane 1: Gazebo Server (Physics)
-tmux send-keys -t digital_twin "gz sim -s -r $BASE_DIR/demo_world.sdf" C-m
+# 3. Wait a split second for tmux to initialize
+sleep 0.5
 
-# Pane 2: ROS-GZ Bridge
-tmux split-window -h -t digital_twin
-tmux send-keys -t digital_twin "ros2 run ros_gz_bridge parameter_bridge '/model/so101_arm/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model' --ros-args -r /model/so101_arm/joint_state:=/joint_states" C-m
+# 4. Pane 1: Mesh Server (Left Pane)
+# We target the session directly to avoid index errors
+tmux send-keys -t twin "cd ~/demo/snap-twin/test-base && python3 mesh_server.py" C-m
 
-# Pane 3: Process Xacro and Start Python Viz Server
-tmux select-pane -t 0
-tmux split-window -v -t digital_twin
-tmux send-keys -t digital_twin "cd $BASE_DIR && \
-xacro scene_description.xacro > final_scene.urdf && \
-sed -i 's|filename=\"assets/|filename=\"package://SO101/assets/|g' final_scene.urdf && \
-$VENV_PYTHON viz_server.py" C-m
+# 5. Split and Pane 2: Viz Server (Right Pane)
+tmux split-window -h -t twin
+tmux send-keys -t twin "conda activate snap-twin && cd ~/demo/snap-twin/test-base && python3 viz_server.py" C-m
 
-# Attach to view the server output
-tmux attach-session -t digital_twin
+# 6. Attach to the session
+tmux attach-session -t twin
