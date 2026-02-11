@@ -9,7 +9,7 @@ from foxglove.schemas import FrameTransforms, FrameTransform, Vector3, Quaternio
 
 # Absolute Paths
 BASE_DIR = "/home/ubuntu/demo/snap-twin"
-URDF_FILE = os.path.join(BASE_DIR, "test-base/final_scene.urdf")
+URDF_FILE = os.path.join(BASE_DIR, "test-base/final_browser.urdf")
 TEMP_URDF = os.path.join(BASE_DIR, "test-base/final_scene_resolved.urdf")
 PACKAGE_ROOT = os.path.join(BASE_DIR, "simulation/models/SO101")
 

@@ -16,28 +16,28 @@
     <visual>
       <origin rpy="1.5708 0 1.5708" xyz="-0.00636471 -9.94414e-05 -0.0024"/>
       <geometry>
-        <mesh filename="assets/base_motor_holder_so101_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/base_motor_holder_so101_v1.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <origin rpy="1.5708 0 1.5708" xyz="-0.00636471 0 -0.0024"/>
       <geometry>
-        <mesh filename="assets/base_so101_v2.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/base_so101_v2.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <origin rpy="0 0 0" xyz="0.0263353 0 0.0437"/>
       <geometry>
-        <mesh filename="assets/sts3215_03a_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/sts3215_03a_v1.stl"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <visual>
       <origin rpy="1.5708 0 1.5708" xyz="-0.0309827 -0.000199441 0.0474"/>
       <geometry>
-        <mesh filename="assets/waveshare_mounting_plate_so101_v2.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/waveshare_mounting_plate_so101_v2.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
@@ -52,21 +52,21 @@
     <visual>
       <origin rpy="1.5708 1.5708 0" xyz="-0.0303992 0.000422241 -0.0417"/>
       <geometry>
-        <mesh filename="assets/sts3215_03a_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/sts3215_03a_v1.stl"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <visual>
       <origin rpy="1.5708 -1.5708 0" xyz="-0.0675992 -0.000177759 0.0158499"/>
       <geometry>
-        <mesh filename="assets/motor_holder_so101_base_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/motor_holder_so101_base_v1.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <origin rpy="-1.5708 0 0" xyz="0.0122008 2.22413e-05 0.0464"/>
       <geometry>
-        <mesh filename="assets/rotation_pitch_so101_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/rotation_pitch_so101_v1.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
@@ -81,14 +81,14 @@
     <visual>
       <origin rpy="-3.14159 0 -1.5708" xyz="-0.11257 -0.0155 0.0187"/>
       <geometry>
-        <mesh filename="assets/sts3215_03a_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/sts3215_03a_v1.stl"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <visual>
       <origin rpy="3.14159 0 0" xyz="-0.065085 0.012 0.0182"/>
       <geometry>
-        <mesh filename="assets/upper_arm_so101_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/upper_arm_so101_v1.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
@@ -103,21 +103,21 @@
     <visual>
       <origin rpy="3.14159 0 0" xyz="-0.0648499 -0.032 0.0182"/>
       <geometry>
-        <mesh filename="assets/under_arm_so101_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/under_arm_so101_v1.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <origin rpy="-3.14159 0 0" xyz="-0.0648499 -0.032 0.018"/>
       <geometry>
-        <mesh filename="assets/motor_holder_so101_wrist_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/motor_holder_so101_wrist_v1.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
     <visual>
       <origin rpy="-3.14159 0 -3.14159" xyz="-0.1224 0.0052 0.0187"/>
       <geometry>
-        <mesh filename="assets/sts3215_03a_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/sts3215_03a_v1.stl"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
@@ -132,14 +132,14 @@
     <visual>
       <origin rpy="1.5708 1.5708 0" xyz="0 -0.0424 0.0306"/>
       <geometry>
-        <mesh filename="assets/sts3215_03a_no_horn_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/sts3215_03a_no_horn_v1.stl"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <visual>
       <origin rpy="-1.5708 -1.5708 0" xyz="0 -0.028 0.0181"/>
       <geometry>
-        <mesh filename="assets/wrist_roll_pitch_so101_v2.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/wrist_roll_pitch_so101_v2.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
@@ -154,14 +154,14 @@
     <visual>
       <origin rpy="-1.5708 0 0" xyz="0.0077 0.0001 -0.0234"/>
       <geometry>
-        <mesh filename="assets/sts3215_03a_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/sts3215_03a_v1.stl"/>
       </geometry>
       <material name="sts3215"/>
     </visual>
     <visual>
       <origin rpy="-3.14159 0 0" xyz="0 -0.000218214 0.000949706"/>
       <geometry>
-        <mesh filename="assets/wrist_roll_follower_so101_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/wrist_roll_follower_so101_v1.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
@@ -190,7 +190,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0.0189"/>
       <geometry>
-        <mesh filename="assets/moving_jaw_so101_v1.stl"/>
+        <mesh filename="http://192.168.0.101:8000/assets/moving_jaw_so101_v1.stl"/>
       </geometry>
       <material name="3d_printed"/>
     </visual>
