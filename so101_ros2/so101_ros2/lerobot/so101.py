@@ -2,7 +2,7 @@ import os
 import json
 from collections.abc import Callable
 from typing import Dict, Tuple
-from pynput.keyboard import Listener
+# from pynput.keyboard import Listener
 
 from so101_ros2.lerobot.common.motors import FeetechMotorsBus, Motor, MotorNormMode, MotorCalibration, OperatingMode
 from so101_ros2.lerobot.common.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
@@ -27,7 +27,8 @@ class SO101(Device):
         self.port = port
         self.name = name
         # calibration
-        self.calibration_path = os.path.join(os.path.dirname(__file__), ".cache", f"{self.name}.json")
+        #self.calibration_path = os.path.join(os.path.dirname(__file__), ".cache", f"{self.name}.json")
+        self.calibration_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", f"{self.name}_arm.json")
         if not os.path.exists(self.calibration_path) or recalibrate:
             self.calibrate()
         calibration = self._load_calibration()

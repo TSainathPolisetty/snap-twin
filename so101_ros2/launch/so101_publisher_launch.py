@@ -16,8 +16,8 @@ def generate_launch_description():
             output='screen', # Show stdout/stderr in the console
             emulate_tty=True, # Required for colored output and some logging
             parameters=[
-                {'robot_name': 'so101_leader'},
-                {'port': '/dev/ttyACM0'},
+                {'robot_name': 'leader'},
+                {'port': '/dev/ttyACM1'},
                 {'recalibrate': False}
             ]
         )
