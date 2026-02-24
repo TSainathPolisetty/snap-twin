@@ -1,0 +1,26 @@
+[0.468s] Invoking command in '/home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2': PYTHONPATH=/home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2/build --no-deps symlink_data
+[0.656s] running develop
+[0.790s] running egg_info
+[0.790s] creating so101_ros2.egg-info
+[0.790s] writing so101_ros2.egg-info/PKG-INFO
+[0.791s] writing dependency_links to so101_ros2.egg-info/dependency_links.txt
+[0.791s] writing entry points to so101_ros2.egg-info/entry_points.txt
+[0.791s] writing requirements to so101_ros2.egg-info/requires.txt
+[0.791s] writing top-level names to so101_ros2.egg-info/top_level.txt
+[0.791s] writing manifest file 'so101_ros2.egg-info/SOURCES.txt'
+[0.793s] reading manifest file 'so101_ros2.egg-info/SOURCES.txt'
+[0.793s] writing manifest file 'so101_ros2.egg-info/SOURCES.txt'
+[0.794s] running build_ext
+[0.794s] Creating /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/lib/python3.10/site-packages/so101-ros2.egg-link (link to .)
+[0.795s] Installing so101_ros2_pub script to /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/lib/so101_ros2
+[0.795s] 
+[0.795s] Installed /home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2
+[0.795s] running symlink_data
+[0.795s] creating /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/share/ament_index
+[0.795s] creating /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/share/ament_index/resource_index
+[0.795s] creating /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/share/ament_index/resource_index/packages
+[0.796s] symbolically linking /home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2/resource/so101_ros2 -> /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/share/ament_index/resource_index/packages
+[0.796s] symbolically linking /home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2/package.xml -> /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/share/so101_ros2
+[0.796s] creating /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/share/so101_ros2/launch
+[0.796s] symbolically linking /home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2/launch/so101_publisher_launch.py -> /home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/share/so101_ros2/launch
+[0.813s] Invoked command in '/home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2' returned '0': PYTHONPATH=/home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/msfshrdc/ros2_ws/src/so101_ros2/install/so101_ros2/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/msfshrdc/ros2_ws/src/so101_ros2/build/so101_ros2/build --no-deps symlink_data
