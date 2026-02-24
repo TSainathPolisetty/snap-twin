@@ -12,12 +12,12 @@ pkill -9 -f digital_twin > /dev/null 2>&1
 pkill -9 -f simple_cors_server > /dev/null 2>&1
 sleep 1 
 
-# 2. SETUP ENVIRONMENT (The fix for your "New Terminal" issue)
+# 2. SETUP ENVIRONMENT
 echo "[2/3] Sourcing Environment..."
 conda deactivate 2>/dev/null
 conda deactivate 2>/dev/null
 
-# Sourcing Jazzy (based on your error logs) and your workspace
+# Sourcing Jazzy and your workspace
 source /opt/ros/jazzy/setup.bash 2>/dev/null || source /opt/ros/humble/setup.bash
 source "$BASE_DIR/install/setup.bash"
 
