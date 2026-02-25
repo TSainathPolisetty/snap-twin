@@ -25,11 +25,13 @@ source "$BASE_DIR/install/setup.bash"
 echo "[3/3] Starting Asset Server & Bridge..."
 
 # Tier A: Asset Server (CORS) - Background
+echo "Starting Asset Server..."
 cd "$SNAP_DIR"
-python3 simple_cors_server.py > /dev/null 2>&1 &
+python3 simple_cors_server.py > asset_server.log 2>&1 &
 
 # Tier B: Digital Twin Bridge - Background
-python3 "$SCRIPT_DIR/so101_digital_twin.py" > /dev/null 2>&1 &
+echo "Starting Digital Twin Bridge..."
+python3 "$SCRIPT_DIR/so101_digital_twin.py" > bridge.log 2>&1 &
 
 # Tier C: Hardware Drivers - Foreground
 echo "------------------------------------------------"

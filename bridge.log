@@ -1,0 +1,35 @@
+Unable to resolve filename: http://192.168.0.101:8080/assets/base_motor_holder_so101_v1.stl
+Can't find http://192.168.0.101:8080/assets/base_motor_holder_so101_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/base_so101_v2.stl
+Can't find http://192.168.0.101:8080/assets/base_so101_v2.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Can't find http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/waveshare_mounting_plate_so101_v2.stl
+Can't find http://192.168.0.101:8080/assets/waveshare_mounting_plate_so101_v2.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Can't find http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/motor_holder_so101_base_v1.stl
+Can't find http://192.168.0.101:8080/assets/motor_holder_so101_base_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/rotation_pitch_so101_v1.stl
+Can't find http://192.168.0.101:8080/assets/rotation_pitch_so101_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Can't find http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/upper_arm_so101_v1.stl
+Can't find http://192.168.0.101:8080/assets/upper_arm_so101_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/under_arm_so101_v1.stl
+Can't find http://192.168.0.101:8080/assets/under_arm_so101_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/motor_holder_so101_wrist_v1.stl
+Can't find http://192.168.0.101:8080/assets/motor_holder_so101_wrist_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Can't find http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/sts3215_03a_no_horn_v1.stl
+Can't find http://192.168.0.101:8080/assets/sts3215_03a_no_horn_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/wrist_roll_pitch_so101_v2.stl
+Can't find http://192.168.0.101:8080/assets/wrist_roll_pitch_so101_v2.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Can't find http://192.168.0.101:8080/assets/sts3215_03a_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/wrist_roll_follower_so101_v1.stl
+Can't find http://192.168.0.101:8080/assets/wrist_roll_follower_so101_v1.stl
+Unable to resolve filename: http://192.168.0.101:8080/assets/moving_jaw_so101_v1.stl
+Can't find http://192.168.0.101:8080/assets/moving_jaw_so101_v1.stl
+[INFO] [1772022427.012803478] [so101_digital_twin]: Digital Twin Bridge active. Monitoring moving joints: ['gripper', 'wrist_roll', 'wrist_flex', 'elbow_flex', 'shoulder_lift', 'shoulder_pan']
