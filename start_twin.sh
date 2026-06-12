@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
-BASE_DIR="/home/ubuntu/demo"
-SNAP_DIR="$BASE_DIR/src/snap-twin"
-SCRIPT_DIR="$SNAP_DIR/so101_ros2/scripts"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SNAP_DIR="$SCRIPT_DIR"
+SCRIPT_DIR_ROS="$SNAP_DIR/so101_ros2/scripts"
 
 # 1. KILL ZOMBIES (Crucial for Serial Ports)
 echo "[1/3] Clearing old serial locks (PIDs 7331, 7334, 7335, etc.)..."
@@ -19,7 +19,7 @@ conda deactivate 2>/dev/null
 
 # Sourcing Jazzy and your workspace
 source /opt/ros/jazzy/setup.bash 2>/dev/null || source /opt/ros/humble/setup.bash
-source "$BASE_DIR/install/setup.bash"
+source "$SNAP_DIR/../../install/setup.bash"
 
 # 3. LAUNCH TIERS
 echo "[3/3] Starting Asset Server & Bridge..."
@@ -31,7 +31,7 @@ python3 simple_cors_server.py > asset_server.log 2>&1 &
 
 # Tier B: Digital Twin Bridge - Background
 echo "Starting Digital Twin Bridge..."
-python3 "$SCRIPT_DIR/so101_digital_twin.py" > bridge.log 2>&1 &
+python3 "$SCRIPT_DIR_ROS/so101_digital_twin.py" > bridge.log 2>&1 &
 
 # Tier C: Hardware Drivers - Foreground
 echo "------------------------------------------------"

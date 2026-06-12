@@ -53,21 +53,6 @@ class LeRobotJointStateSubscriber(Node):
             rclpy.shutdown() # Shutdown ROS if robot connection fails
             return None
 
-    #def joint_states_callback(self, msg: JointState):
-     #   if self.robot is None:
-      #      self.get_logger().warn("LeRobot arm not initialized. Skipping joint state update.")
-       #     return
-       # 
-        #joint_states = {} # This will be populated to be a dict of joint_name: joint_angle_deg
-        #for joint_name, joint_value in zip(msg.name, msg.position):
-            joint_states[joint_name] = joint_value / (math.pi) * 180
-        #
-        #try:
-         #   self.get_logger().info(f"Sent action: {joint_states}") # Too verbose for constant updates
-          #  self.robot._bus.sync_write("Goal_Position", joint_states)
-        #except Exception as e:
-         #   self.get_logger().error(f"Error sending action to lerobot arm: {e}")
-    
     def joint_states_callback(self, msg: JointState):
         if self.robot is None:
             return

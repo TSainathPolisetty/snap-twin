@@ -19,7 +19,7 @@ class LeRobotJointStatePublisher(Node):
         self.port = self.get_parameter('port').value
         self.recalibrate = self.get_parameter('recalibrate').value
 
-        self.publisher_ = self.create_publisher(JointState, '/joint_states', 1)
+        self.publisher_ = self.create_publisher(JointState, '/joint_states', 10)
         self.timer = self.create_timer(1/10, self.publish_joint_states) # Publish every 100ms
 
         self.get_logger().info('LeRobotJointStatePublisher node has been started.')

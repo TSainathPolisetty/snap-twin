@@ -1,2 +1,7 @@
-*.log
+host_venv/
+__pycache__/
+*.pyc
+build/
+install/
+log/
 *.log

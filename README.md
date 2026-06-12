@@ -21,3 +21,7 @@ This project integrates specialized open-source components to create a complete 
 * **Simulation & Kinematics:** The URDF models, Gazebo simulation environments, and MoveIt 2 configurations are derived from the work of [Pavankv92/lerobot_ws](https://github.com/Pavankv92/lerobot_ws).
 * **Hardware Interface:** The low-level serial communication and ROS 2 hardware nodes are based on the implementation by [msf4-0/so101_ros2](https://github.com/msf4-0/so101_ros2).
 * **Original Hardware Design:** All SO-101 robotic arm designs are part of the [Hugging Face LeRobot](https://github.com/huggingface/lerobot) project.
+
+## Archived Exploration
+
+The `experiments/test-base/` folder contains archived exploration work from early prototyping. It is not part of the main system and is kept for reference only.
