@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 import time
 import math
 from so101_ros2.lerobot.so101 import SO101
@@ -19,8 +20,21 @@ class LeRobotJointStateSubscriber(Node):
         self.current_positions = None
         self.goal_positions = None
         self.interpolation_step = 0.1  # How much to move per tick (0.0 to 1.0)
-        
-        # 2. Create a high-frequency timer (e.g., 50Hz / 0.02s)
+
+        # 2. Collision gate
+        self.collision_detected = False
+        self.create_subscription(Bool, '/collision_warning', self._collision_cb, 10)
+
+        # 3. Gesture mux — gesture node publishes here when idle animation runs
+        self.gesture_active = False
+        self.create_subscription(
+            Bool, '/gesture_active',
+            lambda msg: setattr(self, 'gesture_active', msg.data), 10)
+        self.create_subscription(
+            JointState, '/gesture/joint_states',
+            self.joint_states_callback, 10)
+
+        # 4. Create a high-frequency timer (e.g., 50Hz / 0.02s)
         self.timer = self.create_timer(0.02, self.interpolation_callback)        
         
         # Get parameter values
@@ -41,6 +55,12 @@ class LeRobotJointStateSubscriber(Node):
         self.robot = self.init_lerobot_arm()
 
 
+    def _collision_cb(self, msg: Bool):
+        if msg.data != self.collision_detected:
+            self.collision_detected = msg.data
+            state = 'STOPPED — collision detected' if msg.data else 'RESUMED'
+            self.get_logger().warn(f'Follower {state}')
+
     def init_lerobot_arm(self):
         robot = SO101(port=self.port, name=self.robot_name, recalibrate=self.recalibrate)
         try:
@@ -53,10 +73,30 @@ class LeRobotJointStateSubscriber(Node):
             rclpy.shutdown() # Shutdown ROS if robot connection fails
             return None
 
+    #def joint_states_callback(self, msg: JointState):
+     #   if self.robot is None:
+      #      self.get_logger().warn("LeRobot arm not initialized. Skipping joint state update.")
+       #     return
+       # 
+        #joint_states = {} # This will be populated to be a dict of joint_name: joint_angle_deg
+        #for joint_name, joint_value in zip(msg.name, msg.position):
+            joint_states[joint_name] = joint_value / (math.pi) * 180
+        #
+        #try:
+         #   self.get_logger().info(f"Sent action: {joint_states}") # Too verbose for constant updates
+          #  self.robot._bus.sync_write("Goal_Position", joint_states)
+        #except Exception as e:
+         #   self.get_logger().error(f"Error sending action to lerobot arm: {e}")
+    
     def joint_states_callback(self, msg: JointState):
         if self.robot is None:
             return
-        
+
+        # Ignore leader commands while gesture animation is running
+        # (gesture messages from /gesture/joint_states still pass through)
+        if self.gesture_active and not getattr(msg, '_is_gesture', False):
+            return
+
         # UPDATE GOALS ONLY (No direct motor writes)
         new_goals = {}
         for joint_name, joint_value in zip(msg.name, msg.position):
@@ -71,6 +111,10 @@ class LeRobotJointStateSubscriber(Node):
          
     def interpolation_callback(self):
         if self.robot is None or self.goal_positions is None:
+            return
+
+        # COLLISION GATE — freeze arm immediately, do not write to motors
+        if self.collision_detected:
             return
 
         # Linear interpolation (LERP) logic
