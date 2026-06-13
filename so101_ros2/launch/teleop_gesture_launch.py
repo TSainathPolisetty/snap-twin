@@ -23,7 +23,7 @@ def generate_launch_description():
     idle_arg = DeclareLaunchArgument(
         "idle_timeout",
         default_value="5.0",
-        description="Seconds of no teleop input before gesture mode starts",
+        description="Seconds of no teleop input before gesture mode starts (float e.g. 5.0)",
     )
 
     leader_node = Node(

@@ -117,5 +117,6 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Foreground: ROS2 launch (leader + follower + gesture node)
+IDLE_TIMEOUT_FLOAT=$(python3 -c "print(float('$IDLE_TIMEOUT'))")
 ros2 launch so101_ros2 teleop_gesture_launch.py \
-    idle_timeout:="$IDLE_TIMEOUT"
+    idle_timeout:="$IDLE_TIMEOUT_FLOAT"

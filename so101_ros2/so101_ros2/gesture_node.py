@@ -118,9 +118,9 @@ class GestureNode(Node):
         self.declare_parameter('publish_hz',  20.0)
         self.declare_parameter('return_secs',  2.0)
 
-        self._idle_timeout = self.get_parameter('idle_timeout').value
-        self._return_secs  = self.get_parameter('return_secs').value
-        hz                 = self.get_parameter('publish_hz').value
+        self._idle_timeout = float(self.get_parameter('idle_timeout').value)
+        self._return_secs  = float(self.get_parameter('return_secs').value)
+        hz                 = float(self.get_parameter('publish_hz').value)
         self._dt           = 1.0 / hz
 
         self._js_pub     = self.create_publisher(JointState, '/gesture/joint_states', 10)
