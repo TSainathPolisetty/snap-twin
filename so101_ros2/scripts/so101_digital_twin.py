@@ -5,6 +5,7 @@ import numpy as np
 import foxglove
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 from yourdfpy import URDF
 from scipy.spatial.transform import Rotation as R
 from foxglove.schemas import FrameTransforms, FrameTransform, Vector3, Quaternion
@@ -22,19 +23,45 @@ class So101DigitalTwin(Node):
         self.movable_joints = [j.name for j in self.robot.robot.joints if j.type == "revolute"]
         self.current_joint_positions = {name: 0.0 for name in self.movable_joints}
         
+        self.gesture_active = False
+        self.gesture_positions = None
+
         self.subscription = self.create_subscription(
             JointState,
             '/joint_states',
             self.joint_state_callback,
             10)
-        
+        self.create_subscription(
+            Bool,
+            '/gesture_active',
+            self._gesture_active_cb,
+            10)
+        self.create_subscription(
+            JointState,
+            '/gesture/joint_states',
+            self._gesture_states_cb,
+            10)
+
         self.get_logger().info(f"Digital Twin Bridge active. Monitoring moving joints: {self.movable_joints}")
 
     def joint_state_callback(self, msg):
+        # During gesture mode, leader positions are ignored
+        if self.gesture_active:
+            return
         # Map hardware names directly to URDF names
         for name, position in zip(msg.name, msg.position):
             if name in self.current_joint_positions:
                 self.current_joint_positions[name] = position
+
+    def _gesture_active_cb(self, msg):
+        self.gesture_active = msg.data
+
+    def _gesture_states_cb(self, msg):
+        self.gesture_positions = msg
+        if self.gesture_active:
+            for name, position in zip(msg.name, msg.position):
+                if name in self.current_joint_positions:
+                    self.current_joint_positions[name] = position
 
     def get_foxglove_transforms(self):
         # Update the URDF math engine with the latest motor angles

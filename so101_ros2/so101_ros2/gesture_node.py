@@ -36,55 +36,62 @@ MOVEMENT_THRESHOLD = 3.0   # degrees — below this = leader is idle
 
 def build_gesture_sequence():
     H = HOME_DEG
+
+    def h(**offsets):
+        names = ["shoulder_pan", "shoulder_lift", "elbow_flex",
+                 "wrist_flex",   "wrist_roll",    "gripper"]
+        pos = list(H)
+        for k, v in offsets.items():
+            pos[names.index(k)] = H[names.index(k)] + v
+        return pos
+
     seq = []
 
-    # 1. LOOK AROUND
+    # LOOK AROUND — pan ±35° from home, all other joints at home
     seq += [
-        (1.2, [-38, 10, 60,  0,  0, 30]),
-        (0.5, [-38, 10, 60,  0,  0, 30]),
-        (1.4, [ 38, 10, 60,  0,  0, 30]),
-        (0.5, [ 38, 10, 60,  0,  0, 30]),
-        (0.9, [  0, 10, 60,  0,  0, 30]),
+        (1.2, h(shoulder_pan=-35)),
+        (0.5, h(shoulder_pan=-35)),
+        (1.4, h(shoulder_pan=+35)),
+        (0.5, h(shoulder_pan=+35)),
+        (0.9, h()),
         (0.4, H),
     ]
 
-    # 2. WAVE
+    # WAVE — raise arm, oscillate wrist
     seq += [
-        (1.0, [25, 55, 25,   0,  0, 25]),
-        (0.25,[25, 55, 25,  35,  0, 25]),
-        (0.25,[25, 55, 25, -25,  0, 25]),
-        (0.25,[25, 55, 25,  35,  0, 25]),
-        (0.25,[25, 55, 25, -25,  0, 25]),
-        (0.25,[25, 55, 25,  35,  0, 25]),
-        (0.25,[25, 55, 25, -25,  0, 25]),
+        (1.0,  h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20)),
+        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=+30)),
+        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=-25)),
+        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=+30)),
+        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=-25)),
+        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=+30)),
+        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=-25)),
+        (1.0,  H),
+        (0.4,  H),
+    ]
+
+    # BECKONING — reach out, curl wrist in/out
+    seq += [
+        (1.0, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
+        (0.4, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
+        (0.4, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
+        (0.4, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
+        (0.4, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
+        (0.4, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
         (1.0, H),
         (0.4, H),
     ]
 
-    # 3. BECKONING
+    # EXCITED WIGGLE — fast small oscillations on multiple joints
     seq += [
-        (1.0, [ 0, 28, 75, -20, 0, 35]),
-        (0.4, [ 0, 28, 75,  30, 0, 10]),
-        (0.4, [ 0, 28, 75, -20, 0, 35]),
-        (0.4, [ 0, 28, 75,  30, 0, 10]),
-        (0.4, [ 0, 28, 75, -20, 0, 35]),
-        (0.4, [ 0, 28, 75,  30, 0, 10]),
-        (1.0, H),
-        (0.4, H),
-    ]
-
-    # 4. EXCITED WIGGLE
-    seq += [
-        (0.14, [-14, 18, 55,  12,  14, 28]),
-        (0.14, [ 14,  8, 50, -12, -14, 18]),
-        (0.14, [-10, 22, 58,  16,  10, 32]),
-        (0.14, [ 10,  8, 50, -16, -10, 18]),
-        (0.14, [-14, 18, 55,  12,  14, 28]),
-        (0.14, [ 14,  8, 50, -12, -14, 18]),
-        (0.14, [-10, 22, 58,  16,  10, 32]),
-        (0.14, [ 10,  8, 50, -16, -10, 18]),
-        (0.14, [-14, 18, 55,  12,  14, 28]),
-        (0.14, [ 14,  8, 50, -12, -14, 18]),
+        (0.14, h(shoulder_pan=-12, shoulder_lift=+8,  wrist_flex=+10)),
+        (0.14, h(shoulder_pan=+12, shoulder_lift=-8,  wrist_flex=-10)),
+        (0.14, h(shoulder_pan=-10, shoulder_lift=+10, wrist_flex=+12)),
+        (0.14, h(shoulder_pan=+10, shoulder_lift=-10, wrist_flex=-12)),
+        (0.14, h(shoulder_pan=-12, shoulder_lift=+8,  wrist_flex=+10)),
+        (0.14, h(shoulder_pan=+12, shoulder_lift=-8,  wrist_flex=-10)),
+        (0.14, h(shoulder_pan=-10, shoulder_lift=+10, wrist_flex=+12)),
+        (0.14, h(shoulder_pan=+10, shoulder_lift=-10, wrist_flex=-12)),
         (0.8,  H),
         (0.6,  H),
     ]
