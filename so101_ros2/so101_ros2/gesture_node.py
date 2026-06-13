@@ -30,12 +30,12 @@ JOINT_NAMES = [
     "wrist_flex",   "wrist_roll",    "gripper",
 ]
 
-HOME_DEG = [0.0, 10.0, 60.0, 0.0, 0.0, 30.0]
+HOME_DEG = [0.0, 10.0, 5.0, 0.0, 0.0, 30.0]
 MOVEMENT_THRESHOLD = 3.0   # degrees — below this = leader is idle
 
 
 def build_gesture_sequence():
-    H = HOME_DEG
+    H = list(HOME_DEG)
 
     def h(**offsets):
         names = ["shoulder_pan", "shoulder_lift", "elbow_flex",
@@ -58,7 +58,7 @@ def build_gesture_sequence():
     ]
 
     # WAVE — raise arm with open gripper, oscillate wrist
-    # lift: 10+30=40° (<=60 OK)  elbow: 60-20=40° (>=0 OK)  gripper: 30+40=70° (<=80 OK)
+    # lift: 10+30=40° (<=60 OK)  elbow: 30-20=10° (>=0 OK)  gripper: 30+40=70° (<=80 OK)
     # wrist flick: +30/-25 deg (within +-45 OK)
     seq += [
         (1.0,  h(shoulder_pan=+20, shoulder_lift=+30, elbow_flex=-20, gripper=+40)),
@@ -73,7 +73,7 @@ def build_gesture_sequence():
     ]
 
     # BECKONING — reach out, curl wrist in/out
-    # elbow: 60+15=75° (<=120 OK)  wrist: -20/+25 deg (within +-45 OK)  gripper: 40/15 deg (0-80 OK)
+    # elbow: 30+15=45° (<=120 OK)  wrist: -20/+25 deg (within +-45 OK)  gripper: 40/15 deg (0-80 OK)
     seq += [
         (1.0, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
         (0.5, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),

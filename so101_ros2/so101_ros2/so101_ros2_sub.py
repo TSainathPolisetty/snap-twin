@@ -32,7 +32,7 @@ class LeRobotJointStateSubscriber(Node):
             lambda msg: setattr(self, 'gesture_active', msg.data), 10)
         self.create_subscription(
             JointState, '/gesture/joint_states',
-            self.joint_states_callback, 10)
+            self.gesture_states_callback, 10)
 
         # 4. Create a high-frequency timer (e.g., 50Hz / 0.02s)
         self.timer = self.create_timer(0.02, self.interpolation_callback)        
@@ -60,6 +60,10 @@ class LeRobotJointStateSubscriber(Node):
             self.collision_detected = msg.data
             state = 'STOPPED — collision detected' if msg.data else 'RESUMED'
             self.get_logger().warn(f'Follower {state}')
+
+    def gesture_states_callback(self, msg: JointState):
+        """Gesture commands always pass through — no gate checks."""
+        self.joint_states_callback_impl(msg)
 
     def init_lerobot_arm(self):
         robot = SO101(port=self.port, name=self.robot_name, recalibrate=self.recalibrate)
@@ -89,12 +93,13 @@ class LeRobotJointStateSubscriber(Node):
          #   self.get_logger().error(f"Error sending action to lerobot arm: {e}")
     
     def joint_states_callback(self, msg: JointState):
-        if self.robot is None:
+        """Leader callback — gated by gesture_active flag."""
+        if self.gesture_active:
             return
+        self.joint_states_callback_impl(msg)
 
-        # Ignore leader commands while gesture animation is running
-        # (gesture messages from /gesture/joint_states still pass through)
-        if self.gesture_active and not getattr(msg, '_is_gesture', False):
+    def joint_states_callback_impl(self, msg: JointState):
+        if self.robot is None:
             return
 
         # UPDATE GOALS ONLY (No direct motor writes)

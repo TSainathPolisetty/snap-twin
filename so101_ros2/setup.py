@@ -1,5 +1,3 @@
-import os
-from glob import glob
 from setuptools import find_packages, setup
 
 package_name = 'so101_ros2'
@@ -7,19 +5,24 @@ package_name = 'so101_ros2'
 setup(
     name=package_name,
     version='0.0.0',
-    packages=find_packages(include=[package_name, f'{package_name}.*'], exclude=['test']), # This will find so101_ros2 and so101_ros2.lerobot
+    packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*_launch.py'))), # Add this line to include your launch files
+        ('share/' + package_name + '/launch', [
+            'launch/so101_publisher_launch.py',
+            'launch/so101_subscriber_launch.py',
+            'launch/teleop_launch.py',
+            'launch/teleop_gesture_launch.py',
+        ]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='msfshrdc',
-    maintainer_email='msfshrdc@todo.todo',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    maintainer='ubuntu',
+    maintainer_email='ubuntu@todo.todo',
+    description='SO-101 ROS2 control package',
+    license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
@@ -28,7 +31,6 @@ setup(
             'depth_anything    = so101_ros2.depth_anything_node:main',
             'collision_checker = so101_ros2.collision_checker_node:main',
             'frame_display     = so101_ros2.frame_display_node:main',
-            'gesture_node      = so101_ros2.gesture_node:main',
             'gesture_node      = so101_ros2.gesture_node:main',
         ],
     },
