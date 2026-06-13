@@ -47,53 +47,57 @@ def build_gesture_sequence():
 
     seq = []
 
-    # LOOK AROUND — pan ±35° from home, all other joints at home
+    # LOOK AROUND — pan ±25° from home  [pan: -25..+25, safe ±90]
     seq += [
-        (1.2, h(shoulder_pan=-35)),
-        (0.5, h(shoulder_pan=-35)),
-        (1.4, h(shoulder_pan=+35)),
-        (0.5, h(shoulder_pan=+35)),
-        (0.9, h()),
-        (0.4, H),
+        (1.2, h(shoulder_pan=-25)),
+        (0.8, h(shoulder_pan=-25)),    # hold left
+        (1.4, h(shoulder_pan=+25)),
+        (0.8, h(shoulder_pan=+25)),    # hold right
+        (1.0, h()),                    # return center
+        (0.8, H),                      # pause before next phase
     ]
 
-    # WAVE — raise arm, oscillate wrist
+    # WAVE — raise arm with open gripper, oscillate wrist
+    # lift: 10+30=40° (<=60 OK)  elbow: 60-20=40° (>=0 OK)  gripper: 30+40=70° (<=80 OK)
+    # wrist flick: +30/-25 deg (within +-45 OK)
     seq += [
-        (1.0,  h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20)),
-        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=+30)),
-        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=-25)),
-        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=+30)),
-        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=-25)),
-        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=+30)),
-        (0.25, h(shoulder_pan=+20, shoulder_lift=+40, elbow_flex=-20, wrist_flex=-25)),
+        (1.0,  h(shoulder_pan=+20, shoulder_lift=+30, elbow_flex=-20, gripper=+40)),
+        (0.30, h(shoulder_pan=+20, shoulder_lift=+30, elbow_flex=-20, wrist_flex=+30, gripper=+40)),
+        (0.30, h(shoulder_pan=+20, shoulder_lift=+30, elbow_flex=-20, wrist_flex=-25, gripper=+40)),
+        (0.30, h(shoulder_pan=+20, shoulder_lift=+30, elbow_flex=-20, wrist_flex=+30, gripper=+40)),
+        (0.30, h(shoulder_pan=+20, shoulder_lift=+30, elbow_flex=-20, wrist_flex=-25, gripper=+40)),
+        (0.30, h(shoulder_pan=+20, shoulder_lift=+30, elbow_flex=-20, wrist_flex=+30, gripper=+40)),
+        (0.30, h(shoulder_pan=+20, shoulder_lift=+30, elbow_flex=-20, wrist_flex=-25, gripper=+40)),
         (1.0,  H),
-        (0.4,  H),
+        (0.8,  H),                     # pause before next phase
     ]
 
     # BECKONING — reach out, curl wrist in/out
+    # elbow: 60+15=75° (<=120 OK)  wrist: -20/+25 deg (within +-45 OK)  gripper: 40/15 deg (0-80 OK)
     seq += [
         (1.0, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
-        (0.4, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
-        (0.4, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
-        (0.4, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
-        (0.4, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
-        (0.4, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
+        (0.5, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
+        (0.5, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
+        (0.5, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
+        (0.5, h(elbow_flex=+15, wrist_flex=-20, gripper=+10)),
+        (0.5, h(elbow_flex=+15, wrist_flex=+25, gripper=-15)),
         (1.0, H),
-        (0.4, H),
+        (0.8, H),                      # pause before next phase
     ]
 
-    # EXCITED WIGGLE — fast small oscillations on multiple joints
+    # EXCITED WIGGLE — small oscillations, min 0.20s per segment for servo response
+    # lift: 10+-8/+-10 -> 2..20 deg (within -30..60 OK)  wrist: +-10/+-12 (within +-45 OK)
     seq += [
-        (0.14, h(shoulder_pan=-12, shoulder_lift=+8,  wrist_flex=+10)),
-        (0.14, h(shoulder_pan=+12, shoulder_lift=-8,  wrist_flex=-10)),
-        (0.14, h(shoulder_pan=-10, shoulder_lift=+10, wrist_flex=+12)),
-        (0.14, h(shoulder_pan=+10, shoulder_lift=-10, wrist_flex=-12)),
-        (0.14, h(shoulder_pan=-12, shoulder_lift=+8,  wrist_flex=+10)),
-        (0.14, h(shoulder_pan=+12, shoulder_lift=-8,  wrist_flex=-10)),
-        (0.14, h(shoulder_pan=-10, shoulder_lift=+10, wrist_flex=+12)),
-        (0.14, h(shoulder_pan=+10, shoulder_lift=-10, wrist_flex=-12)),
+        (0.20, h(shoulder_pan=-12, shoulder_lift=+8,  wrist_flex=+10)),
+        (0.20, h(shoulder_pan=+12, shoulder_lift=-8,  wrist_flex=-10)),
+        (0.20, h(shoulder_pan=-10, shoulder_lift=+10, wrist_flex=+12)),
+        (0.20, h(shoulder_pan=+10, shoulder_lift=-10, wrist_flex=-12)),
+        (0.20, h(shoulder_pan=-12, shoulder_lift=+8,  wrist_flex=+10)),
+        (0.20, h(shoulder_pan=+12, shoulder_lift=-8,  wrist_flex=-10)),
+        (0.20, h(shoulder_pan=-10, shoulder_lift=+10, wrist_flex=+12)),
+        (0.20, h(shoulder_pan=+10, shoulder_lift=-10, wrist_flex=-12)),
         (0.8,  H),
-        (0.6,  H),
+        (0.8,  H),                     # pause before loop restarts
     ]
 
     return seq
