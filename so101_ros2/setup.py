@@ -30,12 +30,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'so101_ros2_pub    = so101_ros2.so101_ros2_pub:main',
-            'so101_ros2_sub    = so101_ros2.so101_ros2_sub:main',
-            'depth_anything    = so101_ros2.depth_anything_node:main',
-            'collision_checker = so101_ros2.collision_checker_node:main',
-            'frame_display     = so101_ros2.frame_display_node:main',
-            'gesture_node      = so101_ros2.gesture_node:main',
+            'so101_ros2_pub = so101_ros2.so101_ros2_pub:main',
+            'so101_ros2_sub = so101_ros2.so101_ros2_sub:main',
+            'gesture_node   = so101_ros2.gesture_node:main',
         ],
     },
 )
