@@ -80,16 +80,22 @@ echo "[3/4] Starting Foxglove services..."
 
 cd "$SNAP_DIR"
 
-# Asset server — serves STL meshes to Foxglove on port 8080
+# Patch URDF mesh URLs with current device IP (fixes hardcoded Rubik Pi address)
+DEVICE_IP=$(hostname -I | awk '{print $1}')
+sed -i "s|http://[0-9.]*:8080|http://$DEVICE_IP:8080|g" \
+    "$SNAP_DIR/final_twin.urdf"
+echo "  URDF mesh URLs updated → http://$DEVICE_IP:8080/assets/"
+
+# Asset server — serves STL meshes and URDF to Foxglove on port 8080
 python3 simple_cors_server.py > /tmp/asset_server.log 2>&1 &
 ASSET_PID=$!
 echo "  Asset server PID: $ASSET_PID (port 8080)"
 
-# Foxglove bridge — restart snap service to ensure clean state on port 8765
-echo "  Restarting Foxglove Bridge snap (port 8765)..."
-sudo snap restart foxglove-bridge 2>/dev/null \
-    && echo "  Foxglove Bridge restarted." \
-    || echo "  Foxglove Bridge already running."
+# Digital twin bridge — FK transforms + Foxglove WebSocket on port 8765
+python3 "$ROS_SCRIPTS/so101_digital_twin.py" > /tmp/digital_twin.log 2>&1 &
+TWIN_PID=$!
+echo "  Digital twin PID: $TWIN_PID (port 8765)"
+
 sleep 1
 
 # --- 4. Launch ---
@@ -111,13 +117,17 @@ echo ""
 cleanup() {
     echo ""
     echo "Shutting down gesture demo..."
-    kill "$ASSET_PID" 2>/dev/null || true
-    pkill -f so101_ros2   2>/dev/null || true
-    pkill -f gesture_node 2>/dev/null || true
+    kill "$ASSET_PID" "$TWIN_PID" 2>/dev/null || true
+    pkill -f so101_ros2     2>/dev/null || true
+    pkill -f gesture_node   2>/dev/null || true
+    pkill -f digital_twin   2>/dev/null || true
     echo "Done."
     exit 0
 }
 trap cleanup SIGINT SIGTERM
+
+# Grant serial port access for this session
+sudo chmod a+rw /dev/ttyACM0 /dev/ttyACM1 2>/dev/null || true
 
 # Foreground: ROS2 launch (leader + follower + gesture node)
 IDLE_TIMEOUT_FLOAT=$(python3 -c "print(float('$IDLE_TIMEOUT'))")
