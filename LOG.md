@@ -1,7 +1,7 @@
 # SnapTwin Technical Log
 
 ## Entry 01: Environment & ROS 2 Stack Setup
-**Date:** 2026-02-04
+**Date:** 2026-06-16
 **Hardware:** Jetson Orin NX (Advantech AFE-R750) | **OS:** Ubuntu 22.04 (Jammy)
 
 ### Stack
