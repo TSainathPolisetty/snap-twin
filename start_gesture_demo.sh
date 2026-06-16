@@ -83,7 +83,7 @@ cd "$SNAP_DIR"
 # Ensure foxglove-bridge snap is not occupying port 8765
 sudo snap stop foxglove-bridge 2>/dev/null || true
 
-# Patch URDF mesh URLs with current device IP (fixes hardcoded Rubik Pi address)
+# Patch URDF mesh URLs with current device IP
 DEVICE_IP=$(hostname -I | awk '{print $1}')
 sed -i "s|http://[0-9.]*:8080|http://$DEVICE_IP:8080|g" \
     "$SNAP_DIR/final_twin.urdf"

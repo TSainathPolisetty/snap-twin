@@ -2,7 +2,7 @@
 
 ## Entry 01: Environment & ROS 2 Stack Setup
 **Date:** 2026-02-04
-**Hardware:** Rubik Pi (QCS6490) | **OS:** Ubuntu 24.04 (Noble)
+**Hardware:** Jetson Orin NX (Advantech AFE-R750) | **OS:** Ubuntu 22.04 (Jammy)
 
 ### Fixes & Workarounds
 - **Dependency Blocker:** Resolved "Unable to locate package" for ROS 2 Jazzy by enabling `noble-updates` and `noble-backports` in `/etc/apt/sources.list.d/ubuntu.sources`.

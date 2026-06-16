@@ -18,6 +18,10 @@ setup(
         ]),
     ],
     install_requires=['setuptools'],
+    package_data={
+        'so101_ros2': ['config/*.json'],
+    },
+    include_package_data=True,
     zip_safe=True,
     maintainer='ubuntu',
     maintainer_email='ubuntu@todo.todo',
