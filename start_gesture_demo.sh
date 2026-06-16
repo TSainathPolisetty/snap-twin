@@ -22,7 +22,7 @@ set -e
 # --- Derive paths relative to this script (works anywhere) ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SNAP_DIR="$SCRIPT_DIR"
-ROS_SCRIPTS="$SNAP_DIR/so101_ros2/scripts"
+ROS_SCRIPTS="$SNAP_DIR/scripts"
 
 # --- Parse optional args ---
 IDLE_TIMEOUT="5.0"
@@ -90,7 +90,7 @@ sed -i "s|http://[0-9.]*:8080|http://$DEVICE_IP:8080|g" \
 echo "  URDF mesh URLs updated → http://$DEVICE_IP:8080/assets/"
 
 # Asset server — serves STL meshes and URDF to Foxglove on port 8080
-python3 simple_cors_server.py > /tmp/asset_server.log 2>&1 &
+python3 "$SNAP_DIR/scripts/simple_cors_server.py" > /tmp/asset_server.log 2>&1 &
 ASSET_PID=$!
 echo "  Asset server PID: $ASSET_PID (port 8080)"
 

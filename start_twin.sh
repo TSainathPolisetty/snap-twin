@@ -29,7 +29,7 @@ echo "[2/3] Starting Asset Server & Foxglove Bridge..."
 # Tier A: Asset Server (CORS) - Background
 echo "  Starting Asset Server (port 8080)..."
 cd "$SNAP_DIR"
-python3 simple_cors_server.py > /tmp/asset_server.log 2>&1 &
+python3 "$SNAP_DIR/scripts/simple_cors_server.py" > /tmp/asset_server.log 2>&1 &
 
 # Tier B: Foxglove Bridge snap - restart to ensure clean state
 echo "  Restarting Foxglove Bridge snap (port 8765)..."

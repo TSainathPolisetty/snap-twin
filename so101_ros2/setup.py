@@ -11,8 +11,6 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', [
-            'launch/so101_publisher_launch.py',
-            'launch/so101_subscriber_launch.py',
             'launch/teleop_launch.py',
             'launch/teleop_gesture_launch.py',
         ]),
@@ -25,9 +23,8 @@ setup(
     zip_safe=True,
     maintainer='ubuntu',
     maintainer_email='ubuntu@todo.todo',
-    description='SO-101 ROS2 control package',
+    description='SO-101 arm teleop and gesture demo for Jetson Orin NX',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'so101_ros2_pub = so101_ros2.so101_ros2_pub:main',

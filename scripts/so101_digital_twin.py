@@ -11,7 +11,7 @@ from scipy.spatial.transform import Rotation as R
 from foxglove.schemas import FrameTransforms, FrameTransform, Vector3, Quaternion
 
 # Derive paths relative to this script's location
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 URDF_FILE = os.path.join(BASE_DIR, "final_twin.urdf")
 
 class So101DigitalTwin(Node):
