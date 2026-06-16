@@ -1,43 +1,30 @@
 #!/bin/bash
 # Download Depth Anything V2 Small ONNX model
-# Run once on the Rubik Pi before launching the demo
+# Run once on the Jetson Orin before converting with scripts/convert_model.sh
 
 set -e
 
-MODEL_DIR="/home/ubuntu/models"
-MODEL_FILE="$MODEL_DIR/depth_anything_v2_small.onnx"
-
-mkdir -p "$MODEL_DIR"
-
-if [ -f "$MODEL_FILE" ]; then
-    echo "Model already exists at $MODEL_FILE"
-    exit 0
-fi
+mkdir -p ~/models
 
 echo "Installing dependencies..."
-pip3 install onnxruntime huggingface_hub --break-system-packages
+pip3 install huggingface_hub --break-system-packages
 
 echo "Downloading Depth Anything V2 Small ONNX..."
 python3 - << 'EOF'
 from huggingface_hub import hf_hub_download
-import shutil
+import shutil, os
 
+print("Downloading Depth Anything V2 Small ONNX...")
 path = hf_hub_download(
-    repo_id="onnx-community/depth-anything-v2-small",
-    filename="onnx/model.onnx",
+    repo_id="depth-anything/Depth-Anything-V2-Small",
+    filename="depth_anything_v2_vits.onnx",
     cache_dir="/tmp/da_cache"
 )
 
-shutil.copy(path, "/home/ubuntu/models/depth_anything_v2_small.onnx")
-print(f"Model saved to /home/ubuntu/models/depth_anything_v2_small.onnx")
+dest = "/home/ubuntu/models/depth_anything_v2_small.onnx"
+shutil.copy(path, dest)
+print(f"Saved to {dest} ({os.path.getsize(dest)//1024//1024}MB)")
 EOF
 
 echo ""
-echo "Done. Test inference speed with:"
-echo "  python3 -c \""
-echo "    import onnxruntime as ort, numpy as np, time"
-echo "    s = ort.InferenceSession('/home/ubuntu/models/depth_anything_v2_small.onnx')"
-echo "    x = np.random.rand(1,3,518,518).astype('float32')"
-echo "    t = time.time()"
-echo "    for _ in range(5): s.run(None, {s.get_inputs()[0].name: x})"
-echo "    print(f'{5/(time.time()-t):.2f} fps')\"" 
+echo "Done. Now run scripts/convert_model.sh to build the TensorRT engine."
