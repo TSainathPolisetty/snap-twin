@@ -47,30 +47,33 @@ sleep 1
 
 # --- 2. Environment ---
 echo "[2/4] Sourcing ROS2 environment..."
-conda deactivate 2>/dev/null || true
+# Unset any stale environment from previous sessions
+unset ROS_DISTRO AMENT_PREFIX_PATH AMENT_LIBRARIES
+unset COLCON_PREFIX_PATH PYTHONPATH LD_LIBRARY_PATH RMW_IMPLEMENTATION
 
-source /opt/ros/jazzy/setup.bash 2>/dev/null \
-    || source /opt/ros/humble/setup.bash
+# ROS2 via Humble snap (dynamic revision)
+ROS_SNAP_REV=$(ls /snap/ros-humble-ros-base/ \
+    | grep -v current | sort -n | tail -1)
+HUMBLE=/snap/ros-humble-ros-base/$ROS_SNAP_REV/opt/ros/humble
 
-# Workspace install — check colcon build has been run
-INSTALL_SETUP="$(dirname "$SNAP_DIR")/../../install/setup.bash"
-if [ -f "$INSTALL_SETUP" ]; then
-    source "$INSTALL_SETUP"
-else
-    # Try common alternative locations
-    for d in \
-        "$HOME/demo/install/setup.bash" \
-        "$SNAP_DIR/../../../install/setup.bash"
-    do
-        [ -f "$d" ] && source "$d" && break
-    done
+source "$HUMBLE/setup.bash"
+source ~/automate-demo/ros2_ws/install/setup.bash
+
+export LD_LIBRARY_PATH=$HUMBLE/lib/aarch64-linux-gnu:$HUMBLE/lib:\
+/snap/ros-humble-ros-base/$ROS_SNAP_REV/usr/lib/aarch64-linux-gnu:\
+/snap/ros-humble-ros-base/$ROS_SNAP_REV/usr/lib:$LD_LIBRARY_PATH
+export PYTHONPATH=$HUMBLE/local/lib/python3.10/dist-packages:\
+$HUMBLE/lib/python3.10/site-packages:\
+~/automate-demo/ros2_ws/build/so101_ros2:/home/ubuntu:$PYTHONPATH
+export AMENT_PREFIX_PATH=~/automate-demo/ros2_ws/install/so101_ros2:$HUMBLE
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export PATH=$HUMBLE/bin:$PATH:/home/ubuntu/.local/bin
+
+# Verify Humble loaded correctly
+if [ "$ROS_DISTRO" != "humble" ]; then
+    echo "ERROR: ROS_DISTRO=$ROS_DISTRO — expected humble. Aborting."
+    exit 1
 fi
-
-# Wayland — required for Ubuntu Frame display output
-export XDG_RUNTIME_DIR=/run/user/0
-export WAYLAND_DISPLAY=wayland-0
-export QT_QPA_PLATFORM=wayland
-export GDK_BACKEND=wayland
 
 # --- 3. Background services ---
 echo "[3/4] Starting Foxglove services..."
@@ -82,11 +85,11 @@ python3 simple_cors_server.py > /tmp/asset_server.log 2>&1 &
 ASSET_PID=$!
 echo "  Asset server PID: $ASSET_PID (port 8080)"
 
-# Digital twin bridge — Foxglove WebSocket on port 8765
-python3 "$ROS_SCRIPTS/so101_digital_twin.py" > /tmp/digital_twin.log 2>&1 &
-TWIN_PID=$!
-echo "  Digital twin PID: $TWIN_PID (port 8765)"
-
+# Foxglove bridge — restart snap service to ensure clean state on port 8765
+echo "  Restarting Foxglove Bridge snap (port 8765)..."
+sudo snap restart foxglove-bridge 2>/dev/null \
+    && echo "  Foxglove Bridge restarted." \
+    || echo "  Foxglove Bridge already running."
 sleep 1
 
 # --- 4. Launch ---
@@ -108,7 +111,7 @@ echo ""
 cleanup() {
     echo ""
     echo "Shutting down gesture demo..."
-    kill "$ASSET_PID" "$TWIN_PID" 2>/dev/null || true
+    kill "$ASSET_PID" 2>/dev/null || true
     pkill -f so101_ros2   2>/dev/null || true
     pkill -f gesture_node 2>/dev/null || true
     echo "Done."

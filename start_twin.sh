@@ -3,8 +3,15 @@
 # --- CONFIGURATION ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SNAP_DIR="$SCRIPT_DIR"
-ROS_SNAP=/snap/ros-humble-ros-base/115
 WS=/home/ubuntu/automate-demo/ros2_ws
+
+# --- Unset any stale environment from previous sessions ---
+unset ROS_DISTRO AMENT_PREFIX_PATH AMENT_LIBRARIES
+unset COLCON_PREFIX_PATH PYTHONPATH LD_LIBRARY_PATH RMW_IMPLEMENTATION
+
+# --- Dynamic snap revision ---
+ROS_SNAP_REV=$(ls /snap/ros-humble-ros-base/ | grep -v current | sort -n | tail -1)
+ROS_SNAP=/snap/ros-humble-ros-base/$ROS_SNAP_REV
 
 # 1. SETUP ENVIRONMENT
 echo "[1/3] Sourcing Environment..."
