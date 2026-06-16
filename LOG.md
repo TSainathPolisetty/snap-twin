@@ -4,12 +4,20 @@
 **Date:** 2026-02-04
 **Hardware:** Jetson Orin NX (Advantech AFE-R750) | **OS:** Ubuntu 22.04 (Jammy)
 
+### Stack
+- ROS 2 Humble via snap (`ros-humble-ros-base`)
+- Foxglove bridge via snap (`foxglove-bridge`)
+- Workspace: `~/demo/ros2_ws`
+
 ### Fixes & Workarounds
-- **Dependency Blocker:** Resolved "Unable to locate package" for ROS 2 Jazzy by enabling `noble-updates` and `noble-backports` in `/etc/apt/sources.list.d/ubuntu.sources`.
-- **Command Not Found:** Fixed missing `gz` command by installing `ros-jazzy-gz-tools-vendor`.
-- **Environment:** Automated sourcing by adding `source /opt/ros/jazzy/setup.bash` to `~/.bashrc`.
+- **ROS snap env:** Humble not on system PATH by default — start scripts dynamically resolve snap revision and source `setup.bash` at runtime.
+- **RMW:** `rmw_fastrtps_cpp` shared libs are inside the snap; `LD_LIBRARY_PATH` must include snap lib paths or nodes fail to init.
+- **Python 3.10 path:** PYTHONPATH must include both `dist-packages` and `site-packages` inside the snap to pick up `rclpy`.
 
 ### Current Status
-- [x] Headless Gazebo Harmonic running `shapes.sdf`.
-- [x] Foxglove WebSocket bridge active on port 8765.
-- [x] Successful 3D visualization on remote laptop.
+- [x] ROS 2 Humble sourced dynamically from snap revision.
+- [x] Foxglove bridge snap active on port 8765.
+- [x] Leader → follower teleoperation working over `/joint_states`.
+- [x] Digital twin FK bridge streaming to Foxglove via custom WebSocket server.
+- [x] Gesture idle animation node integrated.
+- [x] Depth Anything V2 Small TensorRT fp16 engine built (`~/models/`).

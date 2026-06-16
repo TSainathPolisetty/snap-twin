@@ -53,10 +53,10 @@ pip3 install yourdfpy scipy foxglove-sdk huggingface_hub
 
 **Build the ROS 2 workspace**
 ```bash
-mkdir -p ~/automate-demo/ros2_ws/src
-cd ~/automate-demo/ros2_ws/src
+mkdir -p ~/demo/ros2_ws/src
+cd ~/demo/ros2_ws/src
 git clone <this-repo> snap-twin
-cd ~/automate-demo/ros2_ws
+cd ~/demo/ros2_ws
 colcon build --packages-select so101_ros2 --symlink-install
 ```
 
