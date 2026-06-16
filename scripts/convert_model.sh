@@ -23,9 +23,9 @@ trtexec \
   --onnx="$ONNX" \
   --saveEngine="$ENGINE" \
   --fp16 \
-  --minShapes=input:1x3x518x518 \
-  --optShapes=input:1x3x518x518 \
-  --maxShapes=input:1x3x518x518 \
+  --minShapes=pixel_values:1x3x518x518 \
+  --optShapes=pixel_values:1x3x518x518 \
+  --maxShapes=pixel_values:1x3x518x518 \
   2>&1 | tee ~/models/conversion.log
 
 echo ""
