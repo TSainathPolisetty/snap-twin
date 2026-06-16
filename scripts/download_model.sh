@@ -7,7 +7,7 @@ set -e
 mkdir -p ~/models
 
 echo "Installing dependencies..."
-pip3 install huggingface_hub --break-system-packages
+pip3 install huggingface_hub
 
 echo "Downloading Depth Anything V2 Small ONNX..."
 python3 - << 'EOF'
@@ -16,8 +16,8 @@ import shutil, os
 
 print("Downloading Depth Anything V2 Small ONNX...")
 path = hf_hub_download(
-    repo_id="depth-anything/Depth-Anything-V2-Small",
-    filename="depth_anything_v2_vits.onnx",
+    repo_id="onnx-community/depth-anything-v2-small",
+    filename="onnx/model.onnx",
     cache_dir="/tmp/da_cache"
 )
 
