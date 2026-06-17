@@ -1,0 +1,16 @@
+calibration_timestamp: '2026-06-17T12:42:13.876382'
+intrinsics_file: /home/ubuntu/.ros/camera_info/brio.yaml
+image_size:
+- 518
+- 518
+num_correspondences_total: 12
+num_inliers: 6
+reprojection_error_px: 3.157
+rotation_vector:
+- -1.7245291864544445
+- 1.9603808682219765
+- 0.48697617909420493
+translation_vector:
+- -0.01348441135902724
+- 0.2530730647789798
+- 1.0700273111359342

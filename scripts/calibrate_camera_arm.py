@@ -203,10 +203,15 @@ class CalibrationNode(Node):
 
         # Depth subscriber
         self.create_subscription(Image, '/camera/depth/image_raw', self._depth_cb, 5)
-        # Joint state subscriber — for manual phase (Step 3)
+        # Joint state subscriber — leader positions captured during Step 3
         self.create_subscription(JointState, '/joint_states', self._js_cb, 10)
-        # Arm commander
-        self._arm_pub = self.create_publisher(JointState, '/joint_states', 10)
+
+        # Arm commanding via gesture path so leader can be live simultaneously:
+        #   Steps 0-2: publish /gesture_active=True + /gesture/joint_states to command follower
+        #   Step 3:    publish /gesture_active=False so follower follows leader arm
+        from std_msgs.msg import Bool as BoolMsg
+        self._gesture_active_pub = self.create_publisher(BoolMsg, '/gesture_active', 10)
+        self._gesture_pub = self.create_publisher(JointState, '/gesture/joint_states', 10)
 
         self.get_logger().info('CalibrationNode ready')
 
@@ -220,8 +225,8 @@ class CalibrationNode(Node):
         self._depth_count += 1
 
     def _js_cb(self, msg: JointState):
-        if self._is_commanding:
-            return   # ignore echo of our own commands
+        # Always accept — we only read /joint_states from leader during Step 3
+        # (calibration script publishes on /gesture/joint_states, not /joint_states)
         self._latest_js = {name: pos for name, pos in zip(msg.name, msg.position)}
 
     # ── Utilities ─────────────────────────────────────────────────────────
@@ -258,19 +263,29 @@ class CalibrationNode(Node):
         return frames
 
     def command_arm(self, pose_deg, settle_secs=SETTLE_SECS):
-        """Publish JointState pose (degrees→radians) at 10Hz for settle_secs."""
+        """Command arm via gesture path (so leader arm can be live simultaneously).
+        Publishes /gesture_active=True + /gesture/joint_states at 10Hz for settle_secs."""
+        from std_msgs.msg import Bool as BoolMsg
         names = list(pose_deg.keys())
         rads  = [deg * math.pi / 180.0 for deg in pose_deg.values()]
-        self._is_commanding = True
         end = time.time() + settle_secs
         while time.time() < end:
-            msg = JointState()
-            msg.header.stamp = self.get_clock().now().to_msg()
-            msg.name     = names
-            msg.position = rads
-            self._arm_pub.publish(msg)
+            ga = BoolMsg(); ga.data = True
+            self._gesture_active_pub.publish(ga)
+            js = JointState()
+            js.header.stamp = self.get_clock().now().to_msg()
+            js.name     = names
+            js.position = rads
+            self._gesture_pub.publish(js)
             rclpy.spin_once(self, timeout_sec=0.1)
-        self._is_commanding = False
+
+    def release_gesture_control(self):
+        """Yield control back to leader arm (used before Step 3)."""
+        from std_msgs.msg import Bool as BoolMsg
+        for _ in range(5):   # send a few times to ensure delivery
+            ga = BoolMsg(); ga.data = False
+            self._gesture_active_pub.publish(ga)
+            rclpy.spin_once(self, timeout_sec=0.05)
 
     def get_latest_depth(self):
         rclpy.spin_once(self, timeout_sec=0.1)
@@ -398,10 +413,12 @@ class CalibrationNode(Node):
         PAUSE_MIN_SECS  = 0.5     # minimum seconds of near-zero velocity to trigger
         DURATION_SECS   = 18.0
 
+        # Release gesture control so follower tracks the leader arm
+        self.release_gesture_control()
+
         print('Go — move the leader arm now')
         print('Moving slowly and pausing at interesting poses gives best results.')
 
-        self._is_commanding = False   # accept /joint_states from leader
         prev_js = None
         pause_start = None
         captured_at_pause = False
@@ -553,6 +570,9 @@ def main():
     parser.add_argument('--roi-y1', type=float, default=ROI_Y1)
     parser.add_argument('--roi-x2', type=float, default=ROI_X2)
     parser.add_argument('--roi-y2', type=float, default=ROI_Y2)
+    parser.add_argument('--auto',   action='store_true',
+                        help='Skip interactive input() at Step 3 — '
+                             'Step 3 still runs its 18s timer collecting leader arm data')
     args = parser.parse_args()
 
     # Check prerequisites
@@ -597,14 +617,18 @@ def main():
         rclpy.shutdown()
         sys.exit(0)
 
-    # Pause at Step 3 — ask for confirmation
+    # Pause at Step 3 — skip if --auto
     print()
     print('━' * 60)
-    answer = input(
-        'Ready to start the manual calibration phase? Move the leader arm\n'
-        'slowly for 15-20 seconds when I say go.\n'
-        'Press ENTER when ready (or Ctrl+C to skip Step 3 and go to Step 4): '
-    )
+    if args.auto:
+        print('AUTO MODE: proceeding to Step 3 immediately.')
+        print('Move the leader arm slowly for 18 seconds starting NOW.')
+    else:
+        input(
+            'Ready to start the manual calibration phase? Move the leader arm\n'
+            'slowly for 15-20 seconds when I say go.\n'
+            'Press ENTER when ready (or Ctrl+C to skip Step 3 and go to Step 4): '
+        )
 
     try:
         pairs_3d, pairs_2d = node.step3_manual(background_roi, robot, pairs_3d, pairs_2d)
