@@ -1,13 +1,15 @@
 """
-Full demo launch — teleop + gesture + depth + collision avoidance
------------------------------------------------------------------
-Starts all five nodes:
+Full demo launch — teleop + gesture + depth + collision avoidance + display
+---------------------------------------------------------------------------
+Starts all six nodes:
   leader          so101_ros2_pub   /dev/ttyACM1
   follower        so101_ros2_sub   /dev/ttyACM0
   gesture_node    idle animation + /gesture_active mux
   depth_anything  TRT depth inference on /dev/video0
   collision       checks /camera/depth/image_raw → /collision_warning
                   (started 3 s after depth node to allow warm-up)
+  frame_display   OpenCV window: bounding boxes + collision overlay
+                  (started 5 s after depth node to allow warmup)
 
 Usage:
     ros2 launch so101_ros2 full_demo_launch.py
@@ -104,6 +106,23 @@ def generate_launch_description():
         actions=[collision_node],
     )
 
+    # Frame display starts 5 s after launch (depth + collision both up by then).
+    display_node = Node(
+        package="so101_ros2",
+        executable="frame_display",
+        name="frame_display_node",
+        output="screen",
+        parameters=[{
+            "window_width":  960,
+            "window_height": 540,
+        }],
+    )
+
+    display_delayed = TimerAction(
+        period=5.0,
+        actions=[display_node],
+    )
+
     return LaunchDescription([
         idle_arg,
         engine_arg,
@@ -113,4 +132,5 @@ def generate_launch_description():
         gesture_node,
         depth_node,
         collision_delayed,
+        display_delayed,
     ])

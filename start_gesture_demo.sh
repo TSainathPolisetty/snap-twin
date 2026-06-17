@@ -120,10 +120,11 @@ echo ""
 cleanup() {
     echo ""
     echo "Shutting down gesture demo..."
-    kill "$ASSET_PID" "$TWIN_PID" 2>/dev/null || true
+    kill "$ASSET_PID" "$TWIN_PID" "$FOXGLOVE_PID" 2>/dev/null || true
     pkill -f so101_ros2     2>/dev/null || true
     pkill -f gesture_node   2>/dev/null || true
     pkill -f digital_twin   2>/dev/null || true
+    pkill -f foxglove-bridge 2>/dev/null || true
     echo "Done."
     exit 0
 }
@@ -132,9 +133,18 @@ trap cleanup SIGINT SIGTERM
 # Grant serial port access for this session
 sudo chmod a+rw /dev/ttyACM0 /dev/ttyACM1 2>/dev/null || true
 
-# Foreground: ROS2 launch (leader + follower + gesture node)
+# Start Foxglove bridge in background (port 8765) for remote visualisation
+echo "Starting Foxglove bridge on port 8765..."
+snap run foxglove-bridge > /tmp/foxglove_bridge.log 2>&1 &
+FOXGLOVE_PID=$!
+echo "Foxglove bridge PID: $FOXGLOVE_PID"
+
+# Foreground: ROS2 launch (leader + follower + gesture + depth + collision + display)
 IDLE_TIMEOUT_FLOAT=$(python3 -c "print(float('$IDLE_TIMEOUT'))")
 ros2 launch so101_ros2 full_demo_launch.py \
     idle_timeout:="$IDLE_TIMEOUT_FLOAT" \
     engine_path:=/home/ubuntu/models/depth_anything_v2_small.engine \
     camera_device:=/dev/video0
+
+# Kill foxglove bridge when demo exits
+kill "$FOXGLOVE_PID" 2>/dev/null || true

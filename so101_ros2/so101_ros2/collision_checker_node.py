@@ -91,6 +91,7 @@ class CollisionCheckerNode(Node):
             depth=10)
         self._warn_pub   = self.create_publisher(Bool,   '/collision_warning', _volatile_qos)
         self._status_pub = self.create_publisher(String, '/collision_status',  _volatile_qos)
+        self._mask_pub   = self.create_publisher(Image,  '/collision_mask',    5)
 
         if _HAS_VIS:
             self._marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
@@ -253,6 +254,7 @@ class CollisionCheckerNode(Node):
 
         self._publish_status(collision_now, status)
         self._publish_markers(collision_now)
+        self._publish_mask(obstacle_mask, roi.shape)
 
     # ────────────────────────────────────────────────────────────────────────
     # Publishing helpers
@@ -308,6 +310,30 @@ class CollisionCheckerNode(Node):
             array.markers.append(m)
 
         self._marker_pub.publish(array)
+
+    def _publish_mask(self, obstacle_mask: np.ndarray, roi_shape: tuple):
+        """Publish mono8 obstacle mask (white=obstacle) padded to 518×518."""
+        import array as arr
+        # Build a full-frame mask the same size as the depth image (518×518)
+        h_full, w_full = 518, 518
+        full_mask = np.zeros((h_full, w_full), dtype=np.uint8)
+        # Place the ROI mask back into the full frame
+        h_roi, w_roi = roi_shape
+        y1 = int(self._roi_y1 * h_full)
+        x1 = int(self._roi_x1 * w_full)
+        full_mask[y1:y1+h_roi, x1:x1+w_roi] = obstacle_mask.astype(np.uint8) * 255
+
+        now = self.get_clock().now().to_msg()
+        mask_msg = Image()
+        mask_msg.header.stamp    = now
+        mask_msg.header.frame_id = 'camera_frame'
+        mask_msg.height          = h_full
+        mask_msg.width           = w_full
+        mask_msg.encoding        = 'mono8'
+        mask_msg.is_bigendian    = False
+        mask_msg.step            = w_full
+        mask_msg.data            = arr.array('B', full_mask.tobytes())
+        self._mask_pub.publish(mask_msg)
 
 
 def main(args=None):

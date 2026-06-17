@@ -6,6 +6,7 @@ Owns camera capture (GStreamer → cv2) and TensorRT fp16 inference.
 Publishes:
   /camera/depth/image_raw         sensor_msgs/Image  encoding=32FC1  ~15 Hz
   /camera/depth/visualization     sensor_msgs/Image  encoding=rgb8   ~15 Hz
+  /camera/image_raw               sensor_msgs/Image  encoding=rgb8   ~15 Hz  (raw camera frame)
 
 Parameters:
   engine_path     (string) path to .engine file
@@ -56,6 +57,7 @@ class DepthAnythingNode(Node):
         # ── Publishers ──────────────────────────────────────────────────────
         self._depth_pub = self.create_publisher(Image, '/camera/depth/image_raw',      5)
         self._vis_pub   = self.create_publisher(Image, '/camera/depth/visualization',  5)
+        self._raw_pub   = self.create_publisher(Image, '/camera/image_raw',            5)
 
         # ── TensorRT engine + buffer allocation ─────────────────────────────
         self.get_logger().info(f'Loading TRT engine: {engine_path}')
@@ -217,6 +219,21 @@ class DepthAnythingNode(Node):
         vis_msg.step           = self._pub_w * 3
         vis_msg.data           = array.array('B', rgb_color.tobytes())
         self._vis_pub.publish(vis_msg)
+
+        # ── Publish raw RGB camera frame (resized to publish resolution) ──────
+        rgb_raw = cv2.cvtColor(
+            cv2.resize(frame, (self._pub_w, self._pub_h), interpolation=cv2.INTER_LINEAR),
+            cv2.COLOR_BGR2RGB)
+        raw_msg                = Image()
+        raw_msg.header.stamp   = now
+        raw_msg.header.frame_id = 'camera_frame'
+        raw_msg.height         = self._pub_h
+        raw_msg.width          = self._pub_w
+        raw_msg.encoding       = 'rgb8'
+        raw_msg.is_bigendian   = False
+        raw_msg.step           = self._pub_w * 3
+        raw_msg.data           = array.array('B', rgb_raw.tobytes())
+        self._raw_pub.publish(raw_msg)
 
         self._frame_count += 1
         if self._frame_count % 30 == 0:
