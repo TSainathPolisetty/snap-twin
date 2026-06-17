@@ -13,6 +13,7 @@ setup(
         ('share/' + package_name + '/launch', [
             'launch/teleop_launch.py',
             'launch/teleop_gesture_launch.py',
+            'launch/full_demo_launch.py',
         ]),
     ],
     install_requires=['setuptools'],
@@ -27,9 +28,11 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'so101_ros2_pub = so101_ros2.so101_ros2_pub:main',
-            'so101_ros2_sub = so101_ros2.so101_ros2_sub:main',
-            'gesture_node   = so101_ros2.gesture_node:main',
+            'so101_ros2_pub    = so101_ros2.so101_ros2_pub:main',
+            'so101_ros2_sub    = so101_ros2.so101_ros2_sub:main',
+            'gesture_node      = so101_ros2.gesture_node:main',
+            'depth_anything    = so101_ros2.depth_anything_node:main',
+            'collision_checker = so101_ros2.collision_checker_node:main',
         ],
     },
 )

@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 import time
@@ -7,6 +8,16 @@ import math
 from so101_ros2.lerobot.so101 import SO101
 
 class LeRobotJointStateSubscriber(Node):
+
+    # Safe retreat pose: arm pulls back and up, away from the workspace
+    RETREAT_DEG = {
+        'shoulder_pan':  0.0,
+        'shoulder_lift': -30.0,
+        'elbow_flex':    60.0,
+        'wrist_flex':    0.0,
+        'wrist_roll':    0.0,
+        'gripper':       30.0,
+    }
 
     def __init__(self):
         super().__init__('lerobot_subscriber')
@@ -21,9 +32,15 @@ class LeRobotJointStateSubscriber(Node):
         self.goal_positions = None
         self.interpolation_step = 0.1  # How much to move per tick (0.0 to 1.0)
 
-        # 2. Collision gate
+        # 2. Collision gate — VOLATILE QoS so stale messages from previous sessions
+        #    are not received on startup (prevents spurious retreat at launch)
+        _volatile_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=10)
         self.collision_detected = False
-        self.create_subscription(Bool, '/collision_warning', self._collision_cb, 10)
+        self._pre_retreat_positions = None
+        self.create_subscription(Bool, '/collision_warning', self._collision_cb, _volatile_qos)
 
         # 3. Gesture mux — gesture node publishes here when idle animation runs
         self.gesture_active = False
@@ -56,10 +73,18 @@ class LeRobotJointStateSubscriber(Node):
 
 
     def _collision_cb(self, msg: Bool):
-        if msg.data != self.collision_detected:
-            self.collision_detected = msg.data
-            state = 'STOPPED — collision detected' if msg.data else 'RESUMED'
-            self.get_logger().warn(f'Follower {state}')
+        if msg.data == self.collision_detected:
+            return
+        self.collision_detected = msg.data
+        if msg.data:
+            # False→True: save current pose, override goal to retreat position
+            if self.current_positions is not None:
+                self._pre_retreat_positions = self.current_positions.copy()
+            self.goal_positions = self.RETREAT_DEG.copy()
+            self.get_logger().warn('Follower RETREATING — collision detected')
+        else:
+            # True→False: next teleop/gesture callback will restore goal
+            self.get_logger().warn('Follower RESUMED — collision cleared')
 
     def gesture_states_callback(self, msg: JointState):
         """Gesture commands always pass through — no gate checks."""
@@ -102,6 +127,10 @@ class LeRobotJointStateSubscriber(Node):
         if self.robot is None:
             return
 
+        # Collision retreat takes priority — ignore teleop/gesture updates
+        if self.collision_detected:
+            return
+
         # UPDATE GOALS ONLY (No direct motor writes)
         new_goals = {}
         for joint_name, joint_value in zip(msg.name, msg.position):
@@ -115,12 +144,12 @@ class LeRobotJointStateSubscriber(Node):
             self.current_positions = self.goal_positions.copy()
          
     def interpolation_callback(self):
-        if self.robot is None or self.goal_positions is None:
+        if self.robot is None or self.goal_positions is None or self.current_positions is None:
             return
 
-        # COLLISION GATE — freeze arm immediately, do not write to motors
-        if self.collision_detected:
-            return
+        # No freeze here — when collision_detected=True, goal_positions has
+        # already been set to RETREAT_DEG by _collision_cb, so the LERP below
+        # smoothly carries the arm to the retreat pose automatically.
 
         # Linear interpolation (LERP) logic
         changed = False

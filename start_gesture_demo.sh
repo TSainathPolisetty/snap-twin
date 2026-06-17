@@ -134,5 +134,7 @@ sudo chmod a+rw /dev/ttyACM0 /dev/ttyACM1 2>/dev/null || true
 
 # Foreground: ROS2 launch (leader + follower + gesture node)
 IDLE_TIMEOUT_FLOAT=$(python3 -c "print(float('$IDLE_TIMEOUT'))")
-ros2 launch so101_ros2 teleop_gesture_launch.py \
-    idle_timeout:="$IDLE_TIMEOUT_FLOAT"
+ros2 launch so101_ros2 full_demo_launch.py \
+    idle_timeout:="$IDLE_TIMEOUT_FLOAT" \
+    engine_path:=/home/ubuntu/models/depth_anything_v2_small.engine \
+    camera_device:=/dev/video0
