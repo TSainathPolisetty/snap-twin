@@ -10,15 +10,18 @@ Calibration phase:
 Runtime phase (10 Hz timer):
   Compares each new depth ROI to an adaptive background. A pixel is an obstacle when:
     depth_pixel > background_pixel + depth_change_threshold
-  If the fraction of such pixels exceeds obstacle_area_fraction for 2 consecutive
-  checks → collision. When no collision is active, the background slowly adapts toward
-  the current depth (EMA, alpha=0.97) so gradual arm movement is absorbed without
-  losing sensitivity to sudden new objects.
+  Before computing the obstacle fraction, /arm_self_mask pixels are excluded so the
+  arm's own body is never counted as an obstacle. Run arm_self_mask_node to supply
+  the mask; if unavailable, an all-zero mask is assumed (no arm exclusion).
+  If the fraction of obstacle pixels (after arm exclusion) exceeds obstacle_area_fraction
+  for 2 consecutive checks -> collision. When no collision is active, the background
+  slowly adapts toward the current depth (EMA, alpha=0.97).
 
 Publishes:
   /collision_warning   std_msgs/Bool         (True = stop/retreat)
   /collision_status    std_msgs/String       (human-readable status)
   /obstacle_markers    visualization_msgs/MarkerArray  (red sphere in Foxglove)
+  /collision_mask      sensor_msgs/Image     (mono8, obstacle pixels white)
 
 Parameters (all overridable via --ros-args -p name:=value):
   roi_x1                 float  0.15   ROI left   (normalised 0-1)
@@ -38,11 +41,10 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, String
 
 import numpy as np
+import cv2
 
 try:
     from visualization_msgs.msg import MarkerArray, Marker
-    from geometry_msgs.msg import Point
-    from std_msgs.msg import ColorRGBA
     _HAS_VIS = True
 except ImportError:
     _HAS_VIS = False
@@ -62,7 +64,7 @@ class CollisionCheckerNode(Node):
         self.declare_parameter('obstacle_area_fraction', 0.15)
         self.declare_parameter('calib_frames',           30)
         # Background adapts slowly toward current depth when no collision is active.
-        # At 10Hz: alpha=0.97 → half-life ~23s (absorbs gradual arm movement)
+        # At 10Hz: alpha=0.97 -> half-life ~23s
         self.declare_parameter('background_alpha',       0.97)
 
         self._roi_x1    = self.get_parameter('roi_x1').value
@@ -75,16 +77,15 @@ class CollisionCheckerNode(Node):
         self._bg_alpha  = float(self.get_parameter('background_alpha').value)
 
         # ── Internal state ───────────────────────────────────────────────────
-        self._calib_stack   = []          # list of ROI np arrays during calibration
-        self._background    = None        # (H_roi, W_roi) float32 median map, adapts over time
-        self._latest_depth  = None        # most recent full-frame depth array
-        self._collision     = False       # current published state
-        self._obstacle_streak = 0         # consecutive checks above threshold (for debounce)
-        self._warmup_remaining = 50       # post-calibration adaptation cycles before detection
-        self._arm_moving    = False       # suppress detection while arm is moving
-        self._last_js_positions = None    # previous /joint_states positions for velocity check
+        self._calib_stack      = []      # list of ROI arrays during calibration
+        self._background       = None   # (H_roi, W_roi) float32 median map
+        self._latest_depth     = None   # most recent full-frame depth array
+        self._latest_self_mask = None   # most recent /arm_self_mask (518x518 uint8)
+        self._collision        = False  # current published state
+        self._obstacle_streak  = 0      # consecutive checks above threshold (debounce)
+        self._warmup_remaining = 50     # post-calibration adaptation cycles before detection
 
-        # ── Publishers — VOLATILE so no stale True message persists after restart ──
+        # ── Publishers - VOLATILE so no stale True persists after restart ────
         _volatile_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
@@ -97,31 +98,25 @@ class CollisionCheckerNode(Node):
             self._marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
         else:
             self._marker_pub = None
-            self.get_logger().warn('visualization_msgs not available — /obstacle_markers disabled')
+            self.get_logger().warn('visualization_msgs not available - /obstacle_markers disabled')
 
         # ── Subscriptions ────────────────────────────────────────────────────
         self.create_subscription(Image, '/camera/depth/image_raw',
                                  self._depth_cb, 5)
-        # Subscribe to follower joint states to detect arm movement.
-        # When the arm is moving, depth changes are expected — suppress collision detection.
-        from sensor_msgs.msg import JointState
-        self.create_subscription(JointState, '/joint_states',
-                                 self._joint_states_cb, 10)
-        # Suppress detection when gesture animation is running (arm actively animating)
-        from std_msgs.msg import Bool as BoolMsg
-        self.create_subscription(BoolMsg, '/gesture_active',
-                                 lambda msg: setattr(self, '_gesture_active', msg.data), 10)
-        self._gesture_active = False
+        # Arm self-mask: arm pixels to EXCLUDE from obstacle detection.
+        # Supplied by arm_self_mask_node. If not available, an all-zero mask is assumed.
+        self.create_subscription(Image, '/arm_self_mask',
+                                 self._self_mask_cb, 5)
 
         # ── 10 Hz check timer ────────────────────────────────────────────────
         self.create_timer(0.1, self._check_cb)
 
         self.get_logger().info(
-            f'CollisionChecker started — collecting {self._n_calib} background frames …'
+            f'CollisionChecker started - collecting {self._n_calib} background frames …'
         )
 
     # ────────────────────────────────────────────────────────────────────────
-    # Depth subscription — just decode and cache the latest frame
+    # Depth subscription
     # ────────────────────────────────────────────────────────────────────────
 
     def _depth_cb(self, msg: Image):
@@ -145,20 +140,16 @@ class CollisionCheckerNode(Node):
                 self._build_background()
 
     # ────────────────────────────────────────────────────────────────────────
-    # Joint states subscription — detect arm movement to suppress false alarms
+    # Arm self-mask subscription
     # ────────────────────────────────────────────────────────────────────────
 
-    def _joint_states_cb(self, msg):
-        """Track whether the arm is actively moving. Suppress collision detection
-        when the arm moves to avoid false alarms from the arm itself changing depth."""
-        positions = list(msg.position)
-        if self._last_js_positions is None:
-            self._last_js_positions = positions
+    def _self_mask_cb(self, msg: Image):
+        if msg.encoding != 'mono8':
+            self.get_logger().warn(
+                f'Expected mono8 self-mask, got {msg.encoding}', throttle_duration_sec=10.0)
             return
-        # Check max absolute change across all joints (in radians)
-        max_delta = max(abs(a - b) for a, b in zip(positions, self._last_js_positions))
-        self._arm_moving = max_delta > 0.01   # ~0.6 degrees change = arm is moving
-        self._last_js_positions = positions
+        self._latest_self_mask = np.frombuffer(
+            bytes(msg.data), dtype=np.uint8).reshape(msg.height, msg.width)
 
     # ────────────────────────────────────────────────────────────────────────
     # Background model
@@ -175,9 +166,9 @@ class CollisionCheckerNode(Node):
     def _build_background(self):
         stack = np.stack(self._calib_stack, axis=0)   # (N, H_roi, W_roi)
         self._background = np.median(stack, axis=0).astype(np.float32)
-        self._calib_stack.clear()   # free memory
+        self._calib_stack.clear()
         self.get_logger().info(
-            f'Background calibrated — ROI shape {self._background.shape}, '
+            f'Background calibrated - ROI shape {self._background.shape}, '
             f'mean depth {self._background.mean():.3f}'
         )
 
@@ -186,71 +177,74 @@ class CollisionCheckerNode(Node):
     # ────────────────────────────────────────────────────────────────────────
 
     def _check_cb(self):
-        # Still calibrating
         if self._background is None:
             n = len(self._calib_stack)
-            status = f'CALIBRATING ({n}/{self._n_calib} frames)'
-            self._publish_status(False, status)
+            self._publish_status(False, f'CALIBRATING ({n}/{self._n_calib} frames)')
             return
 
         if self._latest_depth is None:
-            status = 'WAITING — no depth frame received'
-            self._publish_status(False, status)
+            self._publish_status(False, 'WAITING - no depth frame received')
             return
 
-        roi       = self._extract_roi(self._latest_depth)
+        roi = self._extract_roi(self._latest_depth)
 
-        # Safety: re-align shapes if resolution changed after calibration
         if roi.shape != self._background.shape:
             self.get_logger().warn(
-                f'ROI shape mismatch {roi.shape} vs bg {self._background.shape} — skipping',
+                f'ROI shape mismatch {roi.shape} vs bg {self._background.shape} - skipping',
                 throttle_duration_sec=5.0)
             return
 
-        # Always adapt background toward current depth when not in confirmed collision.
-        # During the warmup period, always adapt and never report collision.
+        # Warmup: keep adapting background, no collision reporting yet
         if self._warmup_remaining > 0:
             self._warmup_remaining -= 1
             self._background = (self._bg_alpha * self._background
                                 + (1.0 - self._bg_alpha) * roi)
             self._obstacle_streak = 0
-            status = f'WARMING ({self._warmup_remaining} cycles left)'
-            self._publish_status(False, status)
+            self._publish_status(False, f'WARMING ({self._warmup_remaining} cycles left)')
             return
 
-        # When the arm is moving (leader OR gesture active), depth changes are expected from the arm.
-        # Suppress collision detection and update background to track arm movement.
-        arm_active = self._arm_moving or self._gesture_active
-        if arm_active:
-            self._background = (self._bg_alpha * self._background
-                                + (1.0 - self._bg_alpha) * roi)
-            self._obstacle_streak = 0
-            status = 'CLEAR — arm moving (suppressed)'
-            self._publish_status(False, status)
-            return
+        # Raw obstacle mask: pixels CLOSER than background by more than threshold
+        obstacle_mask = roi > (self._background + self._threshold)
 
-        # Obstacle mask: pixels CLOSER than background by more than threshold
-        obstacle_mask   = roi > (self._background + self._threshold)
-        obstacle_frac   = float(obstacle_mask.mean())
-        raw_collision   = obstacle_frac > self._area_frac
+        # ── Arm self-mask exclusion ──────────────────────────────────────────
+        # Crop /arm_self_mask to the same ROI region, then exclude arm pixels.
+        # This prevents the arm's own body from ever being counted as an obstacle.
+        if self._latest_self_mask is not None:
+            sm = self._latest_self_mask
+            h_sm, w_sm = sm.shape
+            sy1 = int(self._roi_y1 * h_sm)
+            sy2 = int(self._roi_y2 * h_sm)
+            sx1 = int(self._roi_x1 * w_sm)
+            sx2 = int(self._roi_x2 * w_sm)
+            self_mask_roi = sm[sy1:sy2, sx1:sx2]
+            # Resize to match depth ROI dimensions if needed
+            if self_mask_roi.shape != obstacle_mask.shape:
+                self_mask_roi = cv2.resize(
+                    self_mask_roi,
+                    (obstacle_mask.shape[1], obstacle_mask.shape[0]),
+                    interpolation=cv2.INTER_NEAREST)
+            # Exclude arm pixels from obstacle detection
+            obstacle_mask = obstacle_mask & (self_mask_roi == 0)
 
-        # Require 2 consecutive detections to confirm collision (debounce noise)
+        obstacle_frac = float(obstacle_mask.mean())
+        raw_collision = obstacle_frac > self._area_frac
+
+        # 2-check debounce to reject single-frame noise
         if raw_collision:
             self._obstacle_streak += 1
         else:
             self._obstacle_streak = 0
         collision_now = self._obstacle_streak >= 2
 
-        # Adapt background toward current depth ONLY when no collision is active.
-        # This absorbs gradual arm movement while staying sensitive to sudden objects.
+        # Adapt background toward current depth only when no active collision
         if not collision_now:
             self._background = (self._bg_alpha * self._background
                                 + (1.0 - self._bg_alpha) * roi)
 
         if collision_now:
-            status = f'COLLISION — {obstacle_frac*100:.1f}% of ROI obstructed'
+            status = f'COLLISION - {obstacle_frac*100:.1f}% of ROI obstructed'
         else:
-            status = f'CLEAR — {obstacle_frac*100:.2f}% obstacle fraction'
+            status = f'CLEAR - {obstacle_frac*100:.2f}% obstacle fraction'
 
         self._publish_status(collision_now, status)
         self._publish_markers(collision_now)

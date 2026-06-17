@@ -1,15 +1,19 @@
 """
-Full demo launch — teleop + gesture + depth + collision avoidance + display
----------------------------------------------------------------------------
-Starts all six nodes:
+Full demo launch — teleop + gesture + depth + self-mask + collision avoidance + display
+---------------------------------------------------------------------------------------
+Starts all seven nodes:
   leader          so101_ros2_pub   /dev/ttyACM1
   follower        so101_ros2_sub   /dev/ttyACM0
   gesture_node    idle animation + /gesture_active mux
   depth_anything  TRT depth inference on /dev/video0
-  collision       checks /camera/depth/image_raw → /collision_warning
-                  (started 3 s after depth node to allow warm-up)
-  frame_display   OpenCV window: bounding boxes + collision overlay
-                  (started 5 s after depth node to allow warmup)
+  arm_self_mask   FK/static arm mask publisher -> /arm_self_mask
+                  (started 2 s after depth to allow engine warm-up)
+  collision       checks /camera/depth/image_raw vs background, excludes
+                  /arm_self_mask pixels -> /collision_warning
+                  (started 5 s after depth, after arm_self_mask is ready)
+  frame_display   OpenCV window: raw/depth panel flip + self-mask contour +
+                  obstacle boxes + collision overlay
+                  (started 7 s after depth)
 
 Usage:
     ros2 launch so101_ros2 full_demo_launch.py
@@ -92,8 +96,23 @@ def generate_launch_description():
         }],
     )
 
-    # Collision checker starts 3 s after depth node to let the TRT engine
-    # deserialise and the camera pipeline warm up before calibration begins.
+    # Arm self-mask: starts 2 s after depth to let engine deserialise.
+    # Loads calibration/camera_extrinsics.yaml (FK mode) or
+    # calibration/arm_envelope_mask.png (static mode) automatically.
+    self_mask_node = Node(
+        package="so101_ros2",
+        executable="arm_self_mask",
+        name="arm_self_mask_node",
+        output="screen",
+    )
+
+    self_mask_delayed = TimerAction(
+        period=2.0,
+        actions=[self_mask_node],
+    )
+
+    # Collision checker starts 5 s after depth (after arm_self_mask is ready)
+    # so background calibration sees arm pixels already excluded.
     collision_node = Node(
         package="so101_ros2",
         executable="collision_checker",
@@ -102,11 +121,11 @@ def generate_launch_description():
     )
 
     collision_delayed = TimerAction(
-        period=3.0,
+        period=5.0,
         actions=[collision_node],
     )
 
-    # Frame display starts 5 s after launch (depth + collision both up by then).
+    # Frame display starts 7 s after launch (all perception nodes up by then).
     display_node = Node(
         package="so101_ros2",
         executable="frame_display",
@@ -119,7 +138,7 @@ def generate_launch_description():
     )
 
     display_delayed = TimerAction(
-        period=5.0,
+        period=7.0,
         actions=[display_node],
     )
 
@@ -131,6 +150,7 @@ def generate_launch_description():
         follower_node,
         gesture_node,
         depth_node,
+        self_mask_delayed,
         collision_delayed,
         display_delayed,
     ])

@@ -34,6 +34,7 @@ setup(
             'depth_anything    = so101_ros2.depth_anything_node:main',
             'collision_checker = so101_ros2.collision_checker_node:main',
             'frame_display     = so101_ros2.frame_display_node:main',
+            'arm_self_mask     = so101_ros2.arm_self_mask_node:main',
         ],
     },
 )
