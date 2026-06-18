@@ -3,6 +3,8 @@ Split-view frame display node.
 
 Shows overhead annotated RGB on the left and wrist depth colormap on the right,
 with a three-state bottom banner driven by /arm_state (NORMAL / RETREATING / HOLDING).
+
+Runs fullscreen. Works on both X11 and Wayland (ubuntu-frame).
 """
 
 import os
@@ -35,11 +37,11 @@ class FrameDisplayNode(Node):
     def __init__(self):
         super().__init__('frame_display_node')
 
-        self.declare_parameter('window_width',  1280)
-        self.declare_parameter('window_height', 540)
+        self.declare_parameter('screen_width',  1920)
+        self.declare_parameter('screen_height', 1080)
 
-        self._win_w = int(self.get_parameter('window_width').value)
-        self._win_h = int(self.get_parameter('window_height').value)
+        self._win_w = int(self.get_parameter('screen_width').value)
+        self._win_h = int(self.get_parameter('screen_height').value)
 
         self._overhead  = None
         self._depth     = None
@@ -52,8 +54,8 @@ class FrameDisplayNode(Node):
         self.create_timer(1.0 / 15.0, self._display_cb)
 
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(WINDOW_NAME, self._win_w, self._win_h)
-        self.get_logger().info(f'FrameDisplayNode ready — window {self._win_w}x{self._win_h}')
+        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        self.get_logger().info(f'FrameDisplayNode ready — fullscreen {self._win_w}x{self._win_h}')
 
     # ── subscriptions ──────────────────────────────────────────────────────────
 
@@ -71,6 +73,11 @@ class FrameDisplayNode(Node):
     # ── render loop ────────────────────────────────────────────────────────────
 
     def _display_cb(self):
+        # Re-read window size each frame so we adapt if the compositor resizes us
+        rect = cv2.getWindowImageRect(WINDOW_NAME)
+        if rect[2] > 0 and rect[3] > 0:
+            self._win_w, self._win_h = rect[2], rect[3]
+
         panel_w = self._win_w // 2
         panel_h = max(1, self._win_h - BANNER_HEIGHT)
 
@@ -259,7 +266,13 @@ class FrameDisplayNode(Node):
 
 
 def main(args=None):
-    if 'DISPLAY' not in os.environ:
+    # Wayland (ubuntu-frame): set backend hints before any GUI init.
+    # If WAYLAND_DISPLAY is set, use Wayland — do NOT force DISPLAY=:0.
+    if os.environ.get('WAYLAND_DISPLAY'):
+        os.environ.setdefault('GDK_BACKEND', 'wayland')
+        os.environ.setdefault('QT_QPA_PLATFORM', 'wayland')
+        os.environ.pop('DISPLAY', None)
+    elif not os.environ.get('DISPLAY'):
         os.environ['DISPLAY'] = ':0'
 
     rclpy.init(args=args)
