@@ -1,0 +1,161 @@
+name: snap-twin
+base: core22
+version: '1.0'
+summary: SO-101 dual-arm gesture demo with Gengar detection
+description: |
+  ROS2 Humble demo for Jetson Orin NX: leader/follower SO-101 arms,
+  overhead Gengar detection, depth inference with TensorRT, Foxglove
+  visualization. Requires JetPack 6.x on the target device.
+
+grade: devel
+confinement: devmode
+
+plugs:
+  camera:
+    interface: camera
+  serial-port-leader:
+    interface: serial-port
+    path: /dev/ttyACM1
+  serial-port-follower:
+    interface: serial-port
+    path: /dev/ttyACM0
+  opengl:
+    interface: opengl
+  wayland:
+    interface: wayland
+  graphics-core22:
+    interface: content
+    target: $SNAP/graphics
+    default-provider: mesa-core22
+  hardware-observe:
+    interface: hardware-observe
+  system-files-tegra:
+    interface: system-files
+    read:
+      - /usr/lib/aarch64-linux-gnu/tegra
+      - /usr/lib/python3/dist-packages/tensorrt
+      - /usr/src/tensorrt/bin
+  home:
+    interface: home
+
+apps:
+  demo:
+    command: bin/start_demo.sh
+    extensions: [ros2-humble-ros-base]
+    plugs:
+      - camera
+      - serial-port-leader
+      - serial-port-follower
+      - opengl
+      - wayland
+      - graphics-core22
+      - hardware-observe
+      - system-files-tegra
+      - home
+      - network
+      - network-bind
+    environment:
+      LD_LIBRARY_PATH: /usr/lib/aarch64-linux-gnu/tegra:$SNAP/graphics/lib:$LD_LIBRARY_PATH
+      PYTHONPATH: /usr/lib/python3/dist-packages:$PYTHONPATH
+      SNAP_TWIN_DATA_DIR: $SNAP_COMMON
+      WAYLAND_DISPLAY: wayland-0
+      QT_QPA_PLATFORM: wayland
+      GDK_BACKEND: wayland
+      DISPLAY: ""
+
+  foxglove-bridge:
+    command: >-
+      bin/foxglove_bridge
+      --ros-args
+      -p port:=8765
+      -p address:=0.0.0.0
+      -p send_buffer_limit:=10000000
+      -p use_sim_time:=false
+    extensions: [ros2-humble-ros-base]
+    plugs:
+      - network
+      - network-bind
+    daemon: simple
+    restart-condition: on-failure
+
+  asset-server:
+    command: bin/asset_server.sh
+    plugs:
+      - network-bind
+    daemon: simple
+    restart-condition: on-failure
+
+parts:
+  so101-ros2:
+    plugin: colcon
+    source: ..
+    colcon-packages:
+      - so101_ros2
+    colcon-cmake-args:
+      - -DCMAKE_BUILD_TYPE=Release
+    build-packages:
+      - python3-colcon-common-extensions
+    after:
+      - pip-deps
+      - onnx-model
+
+  pip-deps:
+    plugin: python
+    source: ..
+    python-packages:
+      - yourdfpy
+      - scipy
+      - PyYAML
+    build-packages:
+      - python3-dev
+      - libssl-dev
+
+  onnx-model:
+    plugin: nil
+    build-packages:
+      - python3-pip
+    override-build: |
+      pip3 install huggingface_hub --quiet
+      python3 - << 'EOF'
+      from huggingface_hub import hf_hub_download
+      import shutil, os
+      path = hf_hub_download(
+          repo_id="depth-anything/Depth-Anything-V2-Small",
+          filename="depth_anything_v2_vits.onnx",
+          cache_dir="/tmp/da_cache"
+      )
+      dest = os.path.join(os.environ["SNAPCRAFT_PART_INSTALL"],
+                          "models", "depth_anything_v2_small.onnx")
+      os.makedirs(os.path.dirname(dest), exist_ok=True)
+      shutil.copy(path, dest)
+      print(f"Bundled ONNX: {os.path.getsize(dest) // 1024 // 1024}MB")
+      EOF
+    organize:
+      models/: models/
+
+  assets:
+    plugin: dump
+    source: ..
+    stage:
+      - final_twin.urdf
+      - assets/
+      - scripts/simple_cors_server.py
+    organize:
+      scripts/simple_cors_server.py: bin/simple_cors_server.py
+
+  foxglove-bridge-bin:
+    plugin: dump
+    source: /snap/foxglove-bridge/current
+    stage:
+      - opt/ros/snap/lib/foxglove_bridge/foxglove_bridge
+      - opt/ros/snap/lib/*.so*
+      - opt/ros/humble/lib/*.so*
+    organize:
+      opt/ros/snap/lib/foxglove_bridge/foxglove_bridge: bin/foxglove_bridge
+
+  local-scripts:
+    plugin: dump
+    source: local/
+    organize:
+      start_demo.sh: bin/start_demo.sh
+      asset_server.sh: bin/asset_server.sh
