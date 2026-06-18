@@ -7,6 +7,9 @@ import time
 import math
 from so101_ros2.lerobot.so101 import SO101
 
+# Joint names in the same order as the leader publisher and gesture node
+_JOINT_NAMES = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
+
 class LeRobotJointStateSubscriber(Node):
 
     # Safe retreat pose: arm pulls back and up, away from the workspace
@@ -31,6 +34,9 @@ class LeRobotJointStateSubscriber(Node):
         self.current_positions = None
         self.goal_positions = None
         self.interpolation_step = 0.1  # How much to move per tick (0.0 to 1.0)
+        self._prev_gesture_active = False
+        self._handoff_countdown = 0
+        self._handoff_slow_step = self.interpolation_step / 3.0  # 1/3 of normal rate
 
         # 2. Collision gate — VOLATILE QoS so stale messages from previous sessions
         #    are not received on startup (prevents spurious retreat at launch)
@@ -46,13 +52,16 @@ class LeRobotJointStateSubscriber(Node):
         self.gesture_active = False
         self.create_subscription(
             Bool, '/gesture_active',
-            lambda msg: setattr(self, 'gesture_active', msg.data), 10)
+            self._gesture_active_cb, 10)
         self.create_subscription(
             JointState, '/gesture/joint_states',
             self.gesture_states_callback, 10)
 
         # 4. Create a high-frequency timer (e.g., 50Hz / 0.02s)
-        self.timer = self.create_timer(0.02, self.interpolation_callback)        
+        self.timer = self.create_timer(0.02, self.interpolation_callback)
+
+        # 5. Publisher for the follower's actual interpolated position (radians) — used by digital twin
+        self._follower_js_pub = self.create_publisher(JointState, '/follower/joint_states', 10)        
         
         # Get parameter values
         self.robot_name = self.get_parameter('robot_name').value
@@ -86,8 +95,16 @@ class LeRobotJointStateSubscriber(Node):
             # True→False: next teleop/gesture callback will restore goal
             self.get_logger().warn('Follower RESUMED — collision cleared')
 
+    def _gesture_active_cb(self, msg: Bool):
+        if self._prev_gesture_active and not msg.data:
+            self._handoff_countdown = 50
+        self.gesture_active = msg.data
+        self._prev_gesture_active = msg.data
+
     def gesture_states_callback(self, msg: JointState):
-        """Gesture commands always pass through — no gate checks."""
+        """Gesture commands — only accepted while gesture mode is active."""
+        if not self.gesture_active:
+            return
         self.joint_states_callback_impl(msg)
 
     def init_lerobot_arm(self):
@@ -102,21 +119,6 @@ class LeRobotJointStateSubscriber(Node):
             rclpy.shutdown() # Shutdown ROS if robot connection fails
             return None
 
-    #def joint_states_callback(self, msg: JointState):
-     #   if self.robot is None:
-      #      self.get_logger().warn("LeRobot arm not initialized. Skipping joint state update.")
-       #     return
-       # 
-        #joint_states = {} # This will be populated to be a dict of joint_name: joint_angle_deg
-        #for joint_name, joint_value in zip(msg.name, msg.position):
-            joint_states[joint_name] = joint_value / (math.pi) * 180
-        #
-        #try:
-         #   self.get_logger().info(f"Sent action: {joint_states}") # Too verbose for constant updates
-          #  self.robot._bus.sync_write("Goal_Position", joint_states)
-        #except Exception as e:
-         #   self.get_logger().error(f"Error sending action to lerobot arm: {e}")
-    
     def joint_states_callback(self, msg: JointState):
         """Leader callback — gated by gesture_active flag."""
         if self.gesture_active:
@@ -151,16 +153,22 @@ class LeRobotJointStateSubscriber(Node):
         # already been set to RETREAT_DEG by _collision_cb, so the LERP below
         # smoothly carries the arm to the retreat pose automatically.
 
+        if self._handoff_countdown > 0:
+            effective_step = self._handoff_slow_step
+            self._handoff_countdown -= 1
+        else:
+            effective_step = self.interpolation_step
+
         # Linear interpolation (LERP) logic
         changed = False
         for joint in self.current_positions:
             target = self.goal_positions[joint]
             current = self.current_positions[joint]
-            
+
             # Move current position a small step toward target
             diff = target - current
             if abs(diff) > 0.1:  # Threshold to stop micro-vibrations
-                self.current_positions[joint] += diff * self.interpolation_step
+                self.current_positions[joint] += diff * effective_step
                 changed = True
 
         if changed:
@@ -168,7 +176,17 @@ class LeRobotJointStateSubscriber(Node):
                 # Send the "smoothed" positions to the motors
                 self.robot._bus.sync_write("Goal_Position", self.current_positions)
             except Exception as e:
-                self.get_logger().error(f"Write error: {e}")  
+                self.get_logger().error(f"Write error: {e}")
+
+        # Always publish follower's actual interpolated position so the digital twin stays in sync
+        js = JointState()
+        js.header.stamp = self.get_clock().now().to_msg()
+        js.name = _JOINT_NAMES
+        js.position = [
+            float(self.current_positions.get(n, 0.0)) * math.pi / 180.0
+            for n in _JOINT_NAMES
+        ]
+        self._follower_js_pub.publish(js)  
 
 
 def main(args=None):

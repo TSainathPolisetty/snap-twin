@@ -128,11 +128,13 @@ class GestureNode(Node):
         self.declare_parameter('idle_timeout', 5.0)
         self.declare_parameter('publish_hz',  20.0)
         self.declare_parameter('return_secs',  2.0)
+        self.declare_parameter('speed_scale',  1.0)   # <1.0 = slower gestures, >1.0 = faster
 
         self._idle_timeout = float(self.get_parameter('idle_timeout').value)
         self._return_secs  = float(self.get_parameter('return_secs').value)
         hz                 = float(self.get_parameter('publish_hz').value)
         self._dt           = 1.0 / hz
+        self._speed_scale  = max(0.1, float(self.get_parameter('speed_scale').value))
 
         self._js_pub     = self.create_publisher(JointState, '/gesture/joint_states', 10)
         self._active_pub = self.create_publisher(Bool,       '/gesture_active',       10)
@@ -207,7 +209,7 @@ class GestureNode(Node):
 
     def _advance(self):
         duration, target = self._sequence[self._seg_idx]
-        self._seg_t += self._dt
+        self._seg_t += self._dt * self._speed_scale
         t = _ease(self._seg_t / duration)
         self._current_deg = _lerp(self._seg_start_deg, target, t)
         if self._seg_t >= duration:

@@ -1,24 +1,22 @@
 """
-Full demo launch — teleop + gesture + depth + self-mask + collision avoidance + display
----------------------------------------------------------------------------------------
+Full demo launch - teleop + gesture + overhead vision + wrist depth + collision + display
+-----------------------------------------------------------------------------------------
 Starts all seven nodes:
-  leader          so101_ros2_pub   /dev/ttyACM1
-  follower        so101_ros2_sub   /dev/ttyACM0
-  gesture_node    idle animation + /gesture_active mux
-  depth_anything  TRT depth inference on /dev/video0
-  arm_self_mask   FK/static arm mask publisher -> /arm_self_mask
-                  (started 2 s after depth to allow engine warm-up)
-  collision       checks /camera/depth/image_raw vs background, excludes
-                  /arm_self_mask pixels -> /collision_warning
-                  (started 5 s after depth, after arm_self_mask is ready)
-  frame_display   OpenCV window: raw/depth panel flip + self-mask contour +
-                  obstacle boxes + collision overlay
-                  (started 7 s after depth)
+  leader           so101_ros2_pub   /dev/ttyACM1
+  follower         so101_ros2_sub   /dev/ttyACM0
+  gesture_node     idle animation + /gesture_active mux
+  overhead_vision  HSV overhead segmentation on /dev/video0
+  depth_anything   TRT depth inference on wrist camera (/dev/video2 by default)
+  collision        wrist-jaw depth checker -> /collision_warning
+                   (started 3 s after launch)
+  frame_display    OpenCV split view for overhead + wrist depth
+                   (started 5 s after launch)
 
 Usage:
     ros2 launch so101_ros2 full_demo_launch.py
     ros2 launch so101_ros2 full_demo_launch.py idle_timeout:=10.0
-    ros2 launch so101_ros2 full_demo_launch.py camera_device:=/dev/video2
+    ros2 launch so101_ros2 full_demo_launch.py camera_device:=/dev/video4
+    ros2 launch so101_ros2 full_demo_launch.py table_height_m:=0.74
 """
 
 from launch import LaunchDescription
@@ -29,116 +27,114 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 
-    # ── Launch arguments ─────────────────────────────────────────────────────
     idle_arg = DeclareLaunchArgument(
-        "idle_timeout",
-        default_value="5.0",
-        description="Seconds of no teleop input before gesture mode starts (float)",
+        'idle_timeout',
+        default_value='30.0',
+        description='Seconds of no teleop input before gesture mode starts (float)',
     )
 
     engine_arg = DeclareLaunchArgument(
-        "engine_path",
-        default_value="/home/ubuntu/models/depth_anything_v2_small.engine",
-        description="Path to TensorRT .engine file for Depth Anything V2",
+        'engine_path',
+        default_value='/home/ubuntu/models/depth_anything_v2_small.engine',
+        description='Path to TensorRT .engine file for Depth Anything V2',
     )
 
     camera_arg = DeclareLaunchArgument(
-        "camera_device",
-        default_value="/dev/video0",
-        description="V4L2 camera device path (e.g. /dev/video0)",
+        'camera_device',
+        default_value='/dev/video2',
+        description='Wrist depth camera device path (default /dev/video2)',
     )
 
-    # ── Arm nodes ────────────────────────────────────────────────────────────
+    table_height_arg = DeclareLaunchArgument(
+        'table_height_m',
+        default_value='0.72',
+        description='Measured camera-to-table distance in metres (measured: 0.72)',
+    )
+
     leader_node = Node(
-        package="so101_ros2",
-        executable="so101_ros2_pub",
-        name="leader_node",
-        output="screen",
+        package='so101_ros2',
+        executable='so101_ros2_pub',
+        name='leader_node',
+        output='screen',
         parameters=[{
-            "robot_name": "leader",
-            "port":       "/dev/ttyACM1",
-            "recalibrate": False,
+            'robot_name': 'leader',
+            'port': '/dev/ttyACM1',
+            'recalibrate': False,
         }],
     )
 
     follower_node = Node(
-        package="so101_ros2",
-        executable="so101_ros2_sub",
-        name="follower_node",
-        output="screen",
+        package='so101_ros2',
+        executable='so101_ros2_sub',
+        name='follower_node',
+        output='screen',
         parameters=[{
-            "robot_name": "follower",
-            "port":       "/dev/ttyACM0",
-            "recalibrate": False,
+            'robot_name': 'follower',
+            'port': '/dev/ttyACM0',
+            'recalibrate': False,
         }],
     )
 
     gesture_node = Node(
-        package="so101_ros2",
-        executable="gesture_node",
-        name="gesture_node",
-        output="screen",
+        package='so101_ros2',
+        executable='gesture_node',
+        name='gesture_node',
+        output='screen',
         parameters=[{
-            "idle_timeout":  LaunchConfiguration("idle_timeout"),
-            "home_duration": 2.5,
+            'idle_timeout': LaunchConfiguration('idle_timeout'),
+            'home_duration': 2.5,
+            'speed_scale':   0.55,   # ~1.8x slower than default — smoother gestures
+            'return_secs':   0.5,    # fast return-to-home when teleop resumes (was 2.0s)
         }],
     )
 
-    # ── Perception nodes ─────────────────────────────────────────────────────
+    overhead_node = Node(
+        package='so101_ros2',
+        executable='overhead_vision',
+        name='overhead_vision_node',
+        output='screen',
+        parameters=[{
+            'camera_device': '/dev/video0',
+            'table_height_m': LaunchConfiguration('table_height_m'),
+        }],
+    )
+
     depth_node = Node(
-        package="so101_ros2",
-        executable="depth_anything",
-        name="depth_anything_node",
-        output="screen",
+        package='so101_ros2',
+        executable='depth_anything',
+        name='depth_anything_node',
+        output='screen',
         parameters=[{
-            "engine_path":   LaunchConfiguration("engine_path"),
-            "camera_device": LaunchConfiguration("camera_device"),
+            'engine_path': LaunchConfiguration('engine_path'),
+            'camera_device': LaunchConfiguration('camera_device'),
         }],
     )
 
-    # Arm self-mask: starts 2 s after depth to let engine deserialise.
-    # Loads calibration/camera_extrinsics.yaml (FK mode) or
-    # calibration/arm_envelope_mask.png (static mode) automatically.
-    self_mask_node = Node(
-        package="so101_ros2",
-        executable="arm_self_mask",
-        name="arm_self_mask_node",
-        output="screen",
-    )
-
-    self_mask_delayed = TimerAction(
-        period=2.0,
-        actions=[self_mask_node],
-    )
-
-    # Collision checker starts 5 s after depth (after arm_self_mask is ready)
-    # so background calibration sees arm pixels already excluded.
     collision_node = Node(
-        package="so101_ros2",
-        executable="collision_checker",
-        name="collision_checker",
-        output="screen",
+        package='so101_ros2',
+        executable='collision_checker',
+        name='collision_checker',
+        output='screen',
     )
 
     collision_delayed = TimerAction(
-        period=5.0,
+        period=3.0,
         actions=[collision_node],
     )
 
-    # Frame display starts 7 s after launch (all perception nodes up by then).
     display_node = Node(
-        package="so101_ros2",
-        executable="frame_display",
-        name="frame_display_node",
-        output="screen",
+        package='so101_ros2',
+        executable='frame_display',
+        name='frame_display_node',
+        output='screen',
         parameters=[{
-            "window_width":  960,
-            "window_height": 540,
+            'window_width': 1280,
+            'window_height': 480,
         }],
     )
 
     display_delayed = TimerAction(
-        period=7.0,
+        period=5.0,
         actions=[display_node],
     )
 
@@ -146,11 +142,12 @@ def generate_launch_description():
         idle_arg,
         engine_arg,
         camera_arg,
+        table_height_arg,
         leader_node,
         follower_node,
         gesture_node,
+        overhead_node,
         depth_node,
-        self_mask_delayed,
         collision_delayed,
         display_delayed,
     ])
