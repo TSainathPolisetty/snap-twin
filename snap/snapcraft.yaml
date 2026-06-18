@@ -1,6 +1,6 @@
 name: snap-twin
 base: core22
-version: '1.0'
+version: "1.0"
 summary: SO-101 dual-arm gesture demo with Gengar detection
 description: |
   ROS2 Humble demo for Jetson Orin NX: leader/follower SO-101 arms,
@@ -60,13 +60,7 @@ apps:
       DISPLAY: ""
 
   foxglove-bridge:
-    command: >-
-      bin/foxglove_bridge
-      --ros-args
-      -p port:=8765
-      -p address:=0.0.0.0
-      -p send_buffer_limit:=10000000
-      -p use_sim_time:=false
+    command: bin/foxglove-wrapper
     extensions: [ros2-humble-ros-base]
     plugs:
       - network
@@ -85,7 +79,7 @@ parts:
   so101-ros2:
     plugin: colcon
     # XXX: this is evil
-    source: ..
+    source: so101_ros2
     colcon-packages:
       - so101_ros2
     colcon-cmake-args:
@@ -94,59 +88,49 @@ parts:
       - python3-colcon-common-extensions
     after:
       - pip-deps
-      - onnx-model
+      # - onnx-model
 
-  pip-deps:
-    plugin: python
-    # XXX: this is also evil
-    source: ..
-    python-packages:
-      - yourdfpy
-      - scipy
-      - PyYAML
-    build-packages:
-      - python3-dev
-      - libssl-dev
+  # pip-deps:
+  #   plugin: python
+  #   # XXX: this is also evil
+  #   source: ..
+  #   python-packages:
+  #     - yourdfpy
+  #     - scipy
+  #     - PyYAML
+  #   build-packages:
+  #     - python3-dev
+  #     - libssl-dev
 
-  onnx-model:
-    plugin: nil
-    build-packages:
-      - python3-pip
-    override-build: |
-      pip3 install huggingface_hub --quiet
-      python3 - << 'EOF'
-      from huggingface_hub import hf_hub_download
-      import shutil, os
-      path = hf_hub_download(
-          repo_id="depth-anything/Depth-Anything-V2-Small",
-          filename="depth_anything_v2_vits.onnx",
-          cache_dir="/tmp/da_cache"
-      )
-      dest = os.path.join(os.environ["SNAPCRAFT_PART_INSTALL"],
-                          "models", "depth_anything_v2_small.onnx")
-      os.makedirs(os.path.dirname(dest), exist_ok=True)
-      shutil.copy(path, dest)
-      print(f"Bundled ONNX: {os.path.getsize(dest) // 1024 // 1024}MB")
-      EOF
-    organize:
-      # XXX: huh?
-      models/: models/
-
-  assets:
-    plugin: dump
-    # XXX: evil
-    source: ..
-    stage:
-      - final_twin.urdf
-      - assets/
-      - scripts/simple_cors_server.py
-    organize:
-      scripts/simple_cors_server.py: bin/simple_cors_server.py
+  # FIXME: Use the scripts!
+  # onnx-model:
+  #   plugin: nil
+  #   build-packages:
+  #     - python3-pip
+  #   override-build: |
+  #     pip3 install huggingface_hub --quiet
+  #     python3 - << 'EOF'
+  #     from huggingface_hub import hf_hub_download
+  #     import shutil, os
+  #     path = hf_hub_download(
+  #         repo_id="depth-anything/Depth-Anything-V2-Small",
+  #         filename="depth_anything_v2_vits.onnx",
+  #         cache_dir="/tmp/da_cache"
+  #     )
+  #     dest = os.path.join(os.environ["SNAPCRAFT_PART_INSTALL"],
+  #                         "models", "depth_anything_v2_small.onnx")
+  #     os.makedirs(os.path.dirname(dest), exist_ok=True)
+  #     shutil.copy(path, dest)
+  #     print(f"Bundled ONNX: {os.path.getsize(dest) // 1024 // 1024}MB")
+  #     EOF
+  #   organize:
+  #     # XXX: huh?
+  #     models/: models/
 
   foxglove-bridge-bin:
     plugin: nil
     stage-snaps:
-      - foxglove-bridge-bin
+      - foxglove-bridge
     stage:
       - opt/ros/snap/lib/foxglove_bridge/foxglove_bridge
       - opt/ros/snap/lib/*.so*
@@ -154,9 +138,14 @@ parts:
     organize:
       opt/ros/snap/lib/foxglove_bridge/foxglove_bridge: bin/foxglove_bridge
 
-  local-scripts:
+  share:
     plugin: dump
-    source: local/
+    source: share/
     organize:
-      start_demo.sh: bin/start_demo.sh
-      asset_server.sh: bin/asset_server.sh
+      "*": usr/share/snap-twin/
+
+  scripts:
+    plugin: dump
+    source: scripts/
+    organize:
+      "*": usr/bin/
