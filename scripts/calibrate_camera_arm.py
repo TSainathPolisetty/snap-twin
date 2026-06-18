@@ -42,7 +42,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool as BoolMsg
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'share'))
 URDF_FILE = os.path.join(BASE_DIR, 'final_twin.urdf')
 CALIB_DIR = os.path.join(BASE_DIR, 'calibration')
 INTRINSICS_FILE = os.path.expanduser('~/.ros/camera_info/brio.yaml')

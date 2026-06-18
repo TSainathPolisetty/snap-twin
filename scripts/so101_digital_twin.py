@@ -41,7 +41,7 @@ except ImportError:
     _HAS_MARKERS = False
 
 # Derive paths relative to this script's location
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "share"))
 URDF_FILE = os.path.join(BASE_DIR, "final_twin.urdf")
 
 class So101DigitalTwin(Node):

@@ -22,7 +22,10 @@ from sensor_msgs.msg import Image, JointState
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
-BASE_DIR = os.path.expanduser('~/automate-demo/snap-twin')
+BASE_DIR = (
+    os.environ.get('SNAP_TWIN_DATA_DIR')
+    or os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'share'))
+)
 EXTRINSICS_PATH = os.path.join(BASE_DIR, 'calibration', 'camera_extrinsics.yaml')
 INTRINSICS_PATH = os.path.expanduser('~/.ros/camera_info/brio.yaml')
 URDF_PATH = os.path.join(BASE_DIR, 'final_twin.urdf')

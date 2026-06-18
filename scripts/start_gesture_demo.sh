@@ -22,8 +22,9 @@ set -e
 
 # --- Derive paths relative to this script (works anywhere) ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SNAP_DIR="$SCRIPT_DIR"
-ROS_SCRIPTS="$SNAP_DIR/scripts"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SHARE_DIR="$REPO_ROOT/share"
+ROS_SCRIPTS="$SCRIPT_DIR"
 
 # --- Parse optional args ---
 IDLE_TIMEOUT="15.0"
@@ -95,11 +96,12 @@ sudo snap stop foxglove-bridge 2>/dev/null || true
 # Patch URDF mesh URLs with current device IP
 DEVICE_IP=$(hostname -I | awk '{print $1}')
 sed -i "s|http://[0-9.]*:8080|http://$DEVICE_IP:8080|g" \
-    "$SNAP_DIR/final_twin.urdf"
+    "$SHARE_DIR/final_twin.urdf"
 echo "  URDF mesh URLs updated → http://$DEVICE_IP:8080/assets/"
 
 # Asset server — serves STL meshes and URDF to Foxglove on port 8080
-python3 "$SNAP_DIR/scripts/simple_cors_server.py" > /tmp/asset_server.log 2>&1 &
+cd "$SHARE_DIR"
+python3 "$ROS_SCRIPTS/simple_cors_server.py" > /tmp/asset_server.log 2>&1 &
 ASSET_PID=$!
 echo "  Asset server PID: $ASSET_PID (port 8080)"
 

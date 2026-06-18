@@ -28,10 +28,14 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 
-    # Read URDF at launch time (before any nodes start) for robot_state_publisher
-    _urdf_path = os.path.join(
-        os.path.expanduser('~'), 'automate-demo', 'snap-twin', 'final_twin.urdf'
+    # Read URDF at launch time (before any nodes start) for robot_state_publisher.
+    # Resolved relative to this launch file's location — works regardless of where
+    # the repo is cloned. Snap overrides via SNAP_TWIN_DATA_DIR env var.
+    _share_dir = (
+        os.environ.get('SNAP_TWIN_DATA_DIR')
+        or os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'share'))
     )
+    _urdf_path = os.path.join(_share_dir, 'final_twin.urdf')
     with open(_urdf_path, 'r') as _f:
         _robot_description = _f.read()
 
