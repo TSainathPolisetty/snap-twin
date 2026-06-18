@@ -1,0 +1,14 @@
+#!/bin/sh
+
+main() {
+	set -eu
+
+	exec bin/foxglove_bridge \
+	  --ros-args \
+	  -p port:=8765 \
+	  -p address:=0.0.0.0 \
+	  -p send_buffer_limit:=10000000 \
+	  -p use_sim_time:=false
+}
+
+main "$@"
