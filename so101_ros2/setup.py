@@ -35,6 +35,7 @@ setup(
             'collision_checker = so101_ros2.collision_checker_node:main',
             'frame_display     = so101_ros2.frame_display_node:main',
             'overhead_vision   = so101_ros2.overhead_vision_node:main',
+            'tf_static_relay   = so101_ros2.tf_static_relay_node:main',
         ],
     },
 )

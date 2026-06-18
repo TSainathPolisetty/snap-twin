@@ -153,6 +153,12 @@ def generate_launch_description():
     # automatically — no custom WebSocket SDK needed.
     # /obstacle_markers from overhead_vision_node is also forwarded by the bridge
     # with zero extra code.
+    #
+    # NOTE: use_tf_static is NOT supported in Humble RSP. Fixed-joint transforms
+    # are published to /tf_static with TRANSIENT_LOCAL QoS, which the Jazzy
+    # foxglove-bridge snap cannot receive due to cross-distro FastDDS compatibility.
+    # The tf_static_relay node below works around this by republishing /tf_static
+    # content onto volatile /tf, which foxglove-bridge subscribes to just fine.
     robot_state_pub = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -160,6 +166,18 @@ def generate_launch_description():
         output='screen',
         parameters=[{'robot_description': _robot_description}],
         remappings=[('joint_states', '/follower/joint_states')],
+    )
+
+    # tf_static_relay: subscribes to /tf_static (TRANSIENT_LOCAL, works within Humble DDS)
+    # and republishes all accumulated static transforms on volatile /tf at 2 Hz.
+    # This gives the Jazzy foxglove-bridge snap visibility of fixed-joint frames
+    # (world→table, table→base_link, gripper_link→gripper_frame_link, etc.) without
+    # requiring any QoS reconfiguration on either the RSP or the bridge side.
+    tf_relay_node = Node(
+        package='so101_ros2',
+        executable='tf_static_relay',
+        name='tf_static_relay',
+        output='screen',
     )
 
     return LaunchDescription([
@@ -175,4 +193,5 @@ def generate_launch_description():
         collision_delayed,
         display_delayed,
         robot_state_pub,
+        tf_relay_node,
     ])

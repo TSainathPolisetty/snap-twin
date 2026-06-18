@@ -57,9 +57,16 @@ class OverheadVisionNode(Node):
         self.declare_parameter('table_height_m', PLACEHOLDER_TABLE_HEIGHT)
         # Background-diff general obstacle detector (Phase 5)
         self.declare_parameter('bg_capture_secs', 5.0)
+        # bg_diff_threshold kept for reference but is NO LONGER used in the primary
+        # diff path — replaced by HSV-based hue_threshold + sat_threshold below.
         self.declare_parameter('bg_diff_threshold', 30)
         self.declare_parameter('bg_obstacle_min_area', 2000)
         self.declare_parameter('bg_ema_alpha', 0.01)
+        # HSV-based diff thresholds (shadow-resistant): hue 0-180, sat 0-255 (OpenCV scale)
+        # A shadow dims brightness but barely shifts hue/saturation — so a pure brightness
+        # change is ignored, while a real differently-coloured object shifts hue meaningfully.
+        self.declare_parameter('hue_threshold', 15)
+        self.declare_parameter('sat_threshold', 40)
 
         self._camera_device = str(self.get_parameter('camera_device').value)
         self._arm_lower = np.array([
@@ -93,6 +100,8 @@ class OverheadVisionNode(Node):
         self._bg_diff_threshold = int(self.get_parameter('bg_diff_threshold').value)
         self._bg_obstacle_min_area = float(self.get_parameter('bg_obstacle_min_area').value)
         self._bg_ema_alpha = float(self.get_parameter('bg_ema_alpha').value)
+        self._hue_threshold = int(self.get_parameter('hue_threshold').value)
+        self._sat_threshold = int(self.get_parameter('sat_threshold').value)
 
         self._current_joint_positions = {}
         self._gesture_active = False
@@ -536,10 +545,29 @@ class OverheadVisionNode(Node):
         arm_mask_full = cv2.dilate(arm_mask_full, kd, iterations=2)
         arm_roi = arm_mask_full[y1:y2, x1:x2]
 
-        # --- Background diff ---
-        diff = np.abs(roi - self._bg_ref)
-        diff_gray = diff.max(axis=2)
-        anomaly = (diff_gray > self._bg_diff_threshold).astype(np.uint8) * 255
+        # --- Background diff (HSV-based, shadow-resistant) ---
+        # Convert both the current ROI and the background reference to HSV before
+        # diffing. A shadow mostly dims brightness (V channel) while barely shifting
+        # hue (H) or saturation (S). By flagging only pixels where hue OR saturation
+        # differs significantly — and ignoring pure brightness changes — we avoid
+        # triggering on shadows cast across the grey workspace mat.
+        roi_uint8 = np.clip(roi, 0, 255).astype(np.uint8)
+        bg_uint8  = np.clip(self._bg_ref, 0, 255).astype(np.uint8)
+        roi_hsv = cv2.cvtColor(roi_uint8, cv2.COLOR_BGR2HSV)
+        bg_hsv  = cv2.cvtColor(bg_uint8,  cv2.COLOR_BGR2HSV)
+
+        # Hue diff — circular on 0-180 scale (OpenCV HSV hue range)
+        hue_diff = roi_hsv[:, :, 0].astype(np.int16) - bg_hsv[:, :, 0].astype(np.int16)
+        hue_diff = np.abs(hue_diff)
+        hue_diff = np.minimum(hue_diff, 180 - hue_diff)  # shortest arc on 0-180 wheel
+
+        # Saturation diff — 0-255
+        sat_diff = np.abs(roi_hsv[:, :, 1].astype(np.int16) - bg_hsv[:, :, 1].astype(np.int16))
+
+        # A pixel is anomalous if hue shifted meaningfully OR saturation shifted meaningfully.
+        # Pure brightness changes (shadow, lighting variation) are intentionally ignored.
+        anomaly = ((hue_diff > self._hue_threshold) |
+                   (sat_diff  > self._sat_threshold)).astype(np.uint8) * 255
         anomaly[arm_roi > 0] = 0  # exclude arm pixels explicitly
 
         # Morphological cleanup
@@ -563,8 +591,14 @@ class OverheadVisionNode(Node):
         msg.data = self._obstacle_present_now
         self._obstacle_present_pub.publish(msg)
 
-        # EMA background adaptation — ONLY during confirmed-calm periods
-        if not self._collision_warning and not self._obstacle_present_now:
+        # EMA background adaptation — gate ONLY on the wrist camera's collision_warning,
+        # NOT on our own obstacle_present_now. Gating on our own output causes a one-way
+        # trap: a false positive (e.g. shadow) sets obstacle_present_now=True, which
+        # blocks adaptation, which prevents the false trigger from being absorbed, which
+        # keeps obstacle_present_now=True permanently. Using the wrist camera's independent
+        # signal breaks this self-referential lockout: if the wrist says "no collision,"
+        # the overhead is allowed to slowly adapt regardless of its own current belief.
+        if not self._collision_warning:
             cv2.accumulateWeighted(roi, self._bg_ref, self._bg_ema_alpha)
 
         return obstacle_blob
