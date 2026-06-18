@@ -112,9 +112,11 @@ class FrameDisplayNode(Node):
         if self._collision_mask is not None:
             mask = cv2.resize(self._collision_mask, (width, height), interpolation=cv2.INTER_NEAREST)
             overlay = panel.copy()
-            overlay[mask >= 128] = cv2.addWeighted(
-                panel[mask >= 128], 0.45, np.full_like(panel[mask >= 128], 255), 0.55, 0.0
-            )
+            selected = mask >= 128
+            if selected.any():
+                overlay[selected] = cv2.addWeighted(
+                    panel[selected], 0.45, np.full_like(panel[selected], 255), 0.55, 0.0
+                )
             panel = overlay
 
             # Draw bounding boxes around obstacle contours

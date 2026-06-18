@@ -11,6 +11,7 @@ import contextlib
 import io
 import math
 import os
+import time
 
 import cv2
 import numpy as np
@@ -54,6 +55,11 @@ class OverheadVisionNode(Node):
         self.declare_parameter('roi_y2', 0.85)
         self.declare_parameter('min_blob_area', 500)
         self.declare_parameter('table_height_m', PLACEHOLDER_TABLE_HEIGHT)
+        # Background-diff general obstacle detector (Phase 5)
+        self.declare_parameter('bg_capture_secs', 5.0)
+        self.declare_parameter('bg_diff_threshold', 30)
+        self.declare_parameter('bg_obstacle_min_area', 2000)
+        self.declare_parameter('bg_ema_alpha', 0.01)
 
         self._camera_device = str(self.get_parameter('camera_device').value)
         self._arm_lower = np.array([
@@ -82,6 +88,11 @@ class OverheadVisionNode(Node):
         self._roi_y2 = float(self.get_parameter('roi_y2').value)
         self._min_blob_area = float(self.get_parameter('min_blob_area').value)
         self._table_height_m = float(self.get_parameter('table_height_m').value)
+        # Background-diff detector parameters
+        self._bg_capture_secs = float(self.get_parameter('bg_capture_secs').value)
+        self._bg_diff_threshold = int(self.get_parameter('bg_diff_threshold').value)
+        self._bg_obstacle_min_area = float(self.get_parameter('bg_obstacle_min_area').value)
+        self._bg_ema_alpha = float(self.get_parameter('bg_ema_alpha').value)
 
         self._current_joint_positions = {}
         self._gesture_active = False
@@ -98,15 +109,24 @@ class OverheadVisionNode(Node):
         self._tvec = None
         self._rotation = None
         self._camera_origin_base = None
+        # Background-diff general obstacle detector state
+        self._bg_ref = None            # float32 BGR background reference (ROI-sized)
+        self._bg_capturing = True      # True during startup background capture
+        self._bg_capture_start = None  # time.monotonic() when first frame arrived
+        self._collision_warning = False  # gating variable for EMA adaptation
+        self._obstacle_present_now = False  # current bg-diff detection result
+        self._bg_obstacle_blob = None  # latest detected obstacle bbox for annotation
 
         self._annotated_pub = self.create_publisher(Image, '/overhead/image_annotated', 5)
         self._early_notice_pub = self.create_publisher(Bool, '/overhead/early_notice', 10)
         self._consistency_pub = self.create_publisher(String, '/overhead/consistency_status', 10)
         self._marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
+        self._obstacle_present_pub = self.create_publisher(Bool, '/overhead/obstacle_present', 10)
 
         self.create_subscription(JointState, '/joint_states', self._joint_states_cb, 10)
         self.create_subscription(Bool, '/gesture_active', self._gesture_active_cb, 10)
         self.create_subscription(JointState, '/gesture/joint_states', self._gesture_joint_states_cb, 10)
+        self.create_subscription(Bool, '/collision_warning', self._collision_warning_cb, 10)
 
         self._load_extrinsics()
         self._open_camera(self._camera_device)
@@ -233,6 +253,9 @@ class OverheadVisionNode(Node):
         for name, position in zip(msg.name, msg.position):
             self._current_joint_positions[name] = position
 
+    def _collision_warning_cb(self, msg: Bool):
+        self._collision_warning = msg.data
+
     def _timer_cb(self):
         if self._cap is None or not self._cap.isOpened():
             self.get_logger().warn('Overhead camera unavailable - skipping frame', throttle_duration_sec=5.0)
@@ -254,6 +277,7 @@ class OverheadVisionNode(Node):
         consistency_text = self._compute_consistency_status(arm_blob)
         self._publish_string(self._consistency_pub, consistency_text)
 
+        self._bg_obstacle_blob = self._update_bg_detector(frame, hsv)
         annotated = self._annotate_frame(frame, arm_blob, prop_blob, early_notice, consistency_text)
         self._publish_image(annotated)
 
@@ -303,6 +327,13 @@ class OverheadVisionNode(Node):
 
     def _publish_marker(self, prop_blob):
         marker_array = MarkerArray()
+
+        # DIAG-1: log whether prop_blob is found every tick (throttled so it doesn't spam)
+        self.get_logger().info(
+            f'[diag] prop_blob found: {prop_blob is not None}'
+            + (f' area={prop_blob["area"]:.0f} centroid={prop_blob["centroid"]}' if prop_blob else ''),
+            throttle_duration_sec=2.0,
+        )
 
         if prop_blob is None:
             marker = Marker()
@@ -358,7 +389,11 @@ class OverheadVisionNode(Node):
         marker.action = Marker.ADD
         marker.pose.position.x = float(point_base[0])
         marker.pose.position.y = float(point_base[1])
-        marker.pose.position.z = float(point_base[2])
+        # Marker z = table_height_m by backprojection construction.
+        # Add a small upward offset so it renders visibly above the base_link in Foxglove
+        # rather than at/below the floor plane when calibration places the table near z=0.
+        _MARKER_Z_OFFSET = 0.05  # metres — adjustable if marker appears buried
+        marker.pose.position.z = float(point_base[2]) + _MARKER_Z_OFFSET
         marker.pose.orientation.w = 1.0
         marker.scale.x = 0.06
         marker.scale.y = 0.06
@@ -369,6 +404,26 @@ class OverheadVisionNode(Node):
         marker.color.a = 0.85
         marker.lifetime = Duration(seconds=1.0).to_msg()
         marker_array.markers.append(marker)
+
+        # DIAG-2: log full (x, y, z) in base_link before publishing
+        # DIAG-3: log URDF first-joint resting height as reference for "above base" rendering in Foxglove
+        first_joint_z = 'N/A'
+        if self._robot is not None:
+            try:
+                first_j = next(
+                    (j for j in self._robot.robot.joints if j.type == 'revolute'), None
+                )
+                if first_j is not None:
+                    tf_j = self._robot.get_transform(frame_to=first_j.child, frame_from='base_link')
+                    first_joint_z = f'{float(tf_j[2, 3]):.4f} ({first_j.child})'
+            except Exception:
+                pass
+        self.get_logger().info(
+            f'[diag] marker pos base_link: x={point_base[0]:.4f} y={point_base[1]:.4f} '
+            f'z={point_base[2]:.4f} | first_joint_z_in_base={first_joint_z} | table_height_m={self._table_height_m}',
+            throttle_duration_sec=2.0,
+        )
+
         self._marker_pub.publish(marker_array)
 
     def _backproject_to_table(self, pixel_xy):
@@ -431,6 +486,89 @@ class OverheadVisionNode(Node):
         u, v = projected.reshape(2)
         return float(u), float(v)
 
+    def _update_bg_detector(self, frame: np.ndarray, hsv: np.ndarray):
+        """Background-diff general obstacle detector.
+
+        Distinct from the green-prop HSV detector: this detects ANY object that
+        wasn't there when the node started, using a pixel-level background diff.
+        The arm is explicitly excluded using the arm HSV mask computed this same
+        tick (not via background adaptation, which could absorb the arm over time).
+
+        Background reference is established over ~5 s at startup with the
+        workspace assumed empty — this is for obstacle detection only, NOT for
+        depth calibration (see collision_checker_node for that).
+
+        EMA adaptation runs only during confirmed-calm periods (collision_warning
+        False AND obstacle_present False) so a stationary real obstacle cannot
+        slowly be absorbed into the background reference.
+        """
+        fh, fw = frame.shape[:2]
+        x1 = int(self._roi_x1 * fw)
+        y1 = int(self._roi_y1 * fh)
+        x2 = int(self._roi_x2 * fw)
+        y2 = int(self._roi_y2 * fh)
+        roi = frame[y1:y2, x1:x2].astype(np.float32)
+
+        # --- Startup background capture ---
+        if self._bg_capturing:
+            if self._bg_capture_start is None:
+                self._bg_capture_start = time.monotonic()
+                self.get_logger().info(
+                    'BG detector: capturing background reference — keep workspace empty for '
+                    f'{self._bg_capture_secs:.0f} s')
+            # Build background incrementally via EMA (no frame list — avoids large memory spike)
+            if self._bg_ref is None:
+                self._bg_ref = roi.copy()
+            else:
+                cv2.accumulateWeighted(roi, self._bg_ref, 0.3)
+            elapsed = time.monotonic() - self._bg_capture_start
+            if elapsed >= self._bg_capture_secs:
+                self._bg_capturing = False
+                self.get_logger().info('BG detector: reference captured — obstacle detection active')
+            return None
+
+        if self._bg_ref is None:
+            return None
+
+        # --- Arm exclusion mask (dilated to cover arm edges) ---
+        arm_mask_full = self._threshold_hsv(hsv, self._arm_lower, self._arm_upper)
+        kd = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        arm_mask_full = cv2.dilate(arm_mask_full, kd, iterations=2)
+        arm_roi = arm_mask_full[y1:y2, x1:x2]
+
+        # --- Background diff ---
+        diff = np.abs(roi - self._bg_ref)
+        diff_gray = diff.max(axis=2)
+        anomaly = (diff_gray > self._bg_diff_threshold).astype(np.uint8) * 255
+        anomaly[arm_roi > 0] = 0  # exclude arm pixels explicitly
+
+        # Morphological cleanup
+        ks = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        anomaly = cv2.morphologyEx(anomaly, cv2.MORPH_OPEN,  ks, iterations=1)
+        anomaly = cv2.morphologyEx(anomaly, cv2.MORPH_CLOSE, ks, iterations=2)
+
+        # Largest contour
+        contours, _ = cv2.findContours(anomaly, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        obstacle_blob = None
+        if contours:
+            largest = max(contours, key=cv2.contourArea)
+            area = float(cv2.contourArea(largest))
+            if area >= self._bg_obstacle_min_area:
+                bx, by, bw, bh = cv2.boundingRect(largest)
+                # Translate bbox back to full-frame coordinates
+                obstacle_blob = {'area': area, 'bbox': (bx + x1, by + y1, bw, bh)}
+
+        self._obstacle_present_now = obstacle_blob is not None
+        msg = Bool()
+        msg.data = self._obstacle_present_now
+        self._obstacle_present_pub.publish(msg)
+
+        # EMA background adaptation — ONLY during confirmed-calm periods
+        if not self._collision_warning and not self._obstacle_present_now:
+            cv2.accumulateWeighted(roi, self._bg_ref, self._bg_ema_alpha)
+
+        return obstacle_blob
+
     def _annotate_frame(self, frame: np.ndarray, arm_blob, prop_blob, early_notice: bool,
                         consistency_text: str) -> np.ndarray:
         annotated = frame.copy()
@@ -460,6 +598,21 @@ class OverheadVisionNode(Node):
 
         cv2.rectangle(annotated, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 255, 255), 2)
 
+        # Draw bg-diff obstacle blob (orange box — distinct from blue prop box)
+        if self._bg_obstacle_blob is not None:
+            bx, by, bw, bh = self._bg_obstacle_blob['bbox']
+            cv2.rectangle(annotated, (bx, by), (bx + bw, by + bh), (0, 128, 255), 2)
+            cv2.putText(
+                annotated,
+                'OBSTACLE',
+                (bx, max(20, by - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 128, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
         if early_notice:
             cv2.putText(
                 annotated,
@@ -488,7 +641,7 @@ class OverheadVisionNode(Node):
         rgb_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
         msg = Image()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'camera_frame'
+        msg.header.frame_id = 'base_link'
         msg.height = rgb_image.shape[0]
         msg.width = rgb_image.shape[1]
         msg.encoding = 'rgb8'

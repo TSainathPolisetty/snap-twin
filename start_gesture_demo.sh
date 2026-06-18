@@ -5,10 +5,11 @@
 # -----------------------------------------------------------------------------
 # Starts:
 #   - Asset server (STL meshes for Foxglove 3D view)
-#   - Digital twin bridge (Foxglove WebSocket on port 8765)
+#   - foxglove-bridge snap (WebSocket on port 8765, forwards all ROS topics)
 #   - Leader arm (teleop publisher)
 #   - Follower arm (subscriber, respects gesture_active flag)
 #   - Gesture node (idle animation after X seconds of no input)
+#   - robot_state_publisher (computes /tf from /follower/joint_states for Foxglove)
 #
 # Usage:
 #   bash start_gesture_demo.sh
@@ -25,7 +26,7 @@ SNAP_DIR="$SCRIPT_DIR"
 ROS_SCRIPTS="$SNAP_DIR/scripts"
 
 # --- Parse optional args ---
-IDLE_TIMEOUT="30.0"
+IDLE_TIMEOUT="15.0"
 TABLE_HEIGHT=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -33,7 +34,7 @@ while [[ $# -gt 0 ]]; do
         --table-height) TABLE_HEIGHT="$2"; shift 2 ;;
         -h|--help)
             echo "Usage: $0 [--idle-timeout SECONDS] [--table-height METERS]"
-            echo "  --idle-timeout  seconds before gesture mode activates (default: 5.0)"
+            echo "  --idle-timeout  seconds before gesture mode activates (default: 15.0)"
             echo "  --table-height  camera-to-table distance in meters (required for sim population)"
             exit 0 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
@@ -83,8 +84,10 @@ echo "[3/4] Starting Foxglove services..."
 
 cd "$SNAP_DIR"
 
-# Ensure foxglove-bridge snap is not occupying port 8765
-sudo snap stop foxglove-bridge 2>/dev/null || true
+# Restart foxglove-bridge snap so it claims port 8765 fresh.
+# The bridge forwards all ROS topics (including /tf from robot_state_publisher
+# and /obstacle_markers from overhead_vision) to Foxglove Studio automatically.
+sudo snap restart foxglove-bridge 2>/dev/null || true
 
 # Patch URDF mesh URLs with current device IP
 DEVICE_IP=$(hostname -I | awk '{print $1}')
@@ -96,11 +99,6 @@ echo "  URDF mesh URLs updated → http://$DEVICE_IP:8080/assets/"
 python3 "$SNAP_DIR/scripts/simple_cors_server.py" > /tmp/asset_server.log 2>&1 &
 ASSET_PID=$!
 echo "  Asset server PID: $ASSET_PID (port 8080)"
-
-# Digital twin bridge — FK transforms + Foxglove WebSocket on port 8765
-python3 "$ROS_SCRIPTS/so101_digital_twin.py" > /tmp/digital_twin.log 2>&1 &
-TWIN_PID=$!
-echo "  Digital twin PID: $TWIN_PID (port 8765)"
 
 sleep 1
 
@@ -123,10 +121,9 @@ echo ""
 cleanup() {
     echo ""
     echo "Shutting down gesture demo..."
-    kill "$ASSET_PID" "$TWIN_PID" 2>/dev/null || true
+    kill "$ASSET_PID" 2>/dev/null || true
     pkill -f so101_ros2     2>/dev/null || true
     pkill -f gesture_node   2>/dev/null || true
-    pkill -f digital_twin   2>/dev/null || true
     echo "Done."
     exit 0
 }
@@ -135,11 +132,8 @@ trap cleanup SIGINT SIGTERM
 # Grant serial port access for this session
 sudo chmod a+rw /dev/ttyACM0 /dev/ttyACM1 2>/dev/null || true
 
-# Digital twin on port 8765 provides the Foxglove WebSocket server.
-# Do NOT start foxglove-bridge — it would conflict on the same port.
-
-# Foreground: ROS2 launch (leader + follower + gesture + depth + collision + display)
-# NOTE: For obstacle sim population in Foxglove (/scene channel), set table_height_m to the
+# Foreground: ROS2 launch (leader + follower + gesture + depth + collision + display + robot_state_publisher)
+# NOTE: For obstacle sim population in Foxglove (/obstacle_markers channel), set table_height_m to the
 # measured distance (meters) from the Brio camera optical centre to the table surface.
 # Example: ros2 launch ... table_height_m:=0.74
 # Without this, overhead_vision cannot backproject obstacle positions to 3D.
@@ -149,4 +143,4 @@ ros2 launch so101_ros2 full_demo_launch.py \
     engine_path:=/home/ubuntu/models/depth_anything_v2_small.engine \
     ${TABLE_HEIGHT:+table_height_m:=$TABLE_HEIGHT}
 
-# (digital twin exits with the launch process)
+# (ros2 launch process manages all node lifecycles including robot_state_publisher)

@@ -16,7 +16,7 @@ Parameters:
   jaw_y1            float 0.65
   jaw_x2            float 0.70
   jaw_y2            float 1.00
-  delta_threshold   float 0.45  collision threshold (live hardware: at-rest delta ~0.575-0.604, hand-in-jaw ~0.35-0.47)
+  delta_threshold   float 0.30  collision threshold (live hardware: at-rest delta ~0.575-0.604, hand-in-jaw ~0.35-0.47)
   streak_required   int   2
 """
 
@@ -39,8 +39,9 @@ class CollisionCheckerNode(Node):
         self.declare_parameter('jaw_y1', 0.65)
         self.declare_parameter('jaw_x2', 0.70)
         self.declare_parameter('jaw_y2', 1.00)
-        self.declare_parameter('delta_threshold', 0.45)  # live hardware: at-rest delta ~0.575-0.604, hand-in-jaw ~0.35-0.47
+        self.declare_parameter('delta_threshold', 0.30)  # live hardware: at-rest delta ~0.575-0.604, hand-in-jaw ~0.35-0.47
         self.declare_parameter('streak_required', 2)
+        self.declare_parameter('mask_margin', 0.05)  # per-pixel: flag jaw pixels where depth > (rest_p95 - margin)
 
         self._jaw_x1 = float(self.get_parameter('jaw_x1').value)
         self._jaw_y1 = float(self.get_parameter('jaw_y1').value)
@@ -48,6 +49,7 @@ class CollisionCheckerNode(Node):
         self._jaw_y2 = float(self.get_parameter('jaw_y2').value)
         self._delta_threshold = float(self.get_parameter('delta_threshold').value)
         self._streak_required = max(1, int(self.get_parameter('streak_required').value))
+        self._mask_margin = float(self.get_parameter('mask_margin').value)
 
         self._latest_depth = None
         self._obstacle_streak = 0
@@ -112,7 +114,7 @@ class CollisionCheckerNode(Node):
             self._collision_now = False
             self._publish_warning(False)
             self._publish_status('WAITING - insufficient valid wrist depth samples')
-            self._publish_mask(h, w, x1, y1, x2, y2, False, active=False)
+            self._publish_mask(h, w, x1, y1, x2, y2, np.empty(0), 0.0, active=False)
             return
 
         jaw_median = float(np.median(jaw_valid))
@@ -140,7 +142,7 @@ class CollisionCheckerNode(Node):
 
         self._publish_warning(self._collision_now)
         self._publish_status(status)
-        self._publish_mask(h, w, x1, y1, x2, y2, self._collision_now, active=True)
+        self._publish_mask(h, w, x1, y1, x2, y2, jaw, rest_p95, active=True)
 
     def _publish_warning(self, collision_now: bool):
         msg = Bool()
@@ -153,10 +155,24 @@ class CollisionCheckerNode(Node):
         self._status_pub.publish(msg)
 
     def _publish_mask(self, h: int, w: int, x1: int, y1: int, x2: int, y2: int,
-                      collision_now: bool, active: bool):
+                      jaw: np.ndarray, rest_p95: float, active: bool):
+        """Publish per-pixel collision mask.
+
+        Each jaw-region pixel is individually flagged 255 when its depth exceeds
+        (rest_p95 - mask_margin), meaning it is anomalously close to the camera
+        relative to the rest of the scene.  This replaces the old uniform
+        rectangle fill so the mask reflects the actual obstacle shape rather than
+        a flat on/off block.  The aggregate streak-based /collision_warning logic
+        is unchanged — this mask is purely for visualization.
+        """
         mask = np.zeros((h, w), dtype=np.uint8)
-        if active:
-            mask[y1:y2, x1:x2] = 255 if collision_now else 128
+        if active and jaw.size > 0:
+            threshold = rest_p95 - self._mask_margin
+            # Pixels above threshold are anomalously close (potential obstacle).
+            close_pixels = jaw > threshold
+            jaw_mask_region = np.zeros_like(jaw, dtype=np.uint8)
+            jaw_mask_region[close_pixels] = 255
+            mask[y1:y2, x1:x2] = jaw_mask_region
 
         msg = Image()
         msg.header.stamp = self.get_clock().now().to_msg()

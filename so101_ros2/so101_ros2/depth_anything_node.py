@@ -194,7 +194,7 @@ class DepthAnythingNode(Node):
         # ── Publish 32FC1 depth ───────────────────────────────────────────────
         depth_msg                = Image()
         depth_msg.header.stamp   = now
-        depth_msg.header.frame_id = 'camera_frame'
+        depth_msg.header.frame_id = 'wrist_link'
         depth_msg.height         = self._pub_h
         depth_msg.width          = self._pub_w
         depth_msg.encoding       = '32FC1'
@@ -211,7 +211,7 @@ class DepthAnythingNode(Node):
 
         vis_msg                = Image()
         vis_msg.header.stamp   = now
-        vis_msg.header.frame_id = 'camera_frame'
+        vis_msg.header.frame_id = 'wrist_link'
         vis_msg.height         = self._pub_h
         vis_msg.width          = self._pub_w
         vis_msg.encoding       = 'rgb8'
@@ -226,7 +226,7 @@ class DepthAnythingNode(Node):
             cv2.COLOR_BGR2RGB)
         raw_msg                = Image()
         raw_msg.header.stamp   = now
-        raw_msg.header.frame_id = 'camera_frame'
+        raw_msg.header.frame_id = 'wrist_link'
         raw_msg.height         = self._pub_h
         raw_msg.width          = self._pub_w
         raw_msg.encoding       = 'rgb8'

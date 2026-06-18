@@ -1,7 +1,7 @@
 """
 Full demo launch - teleop + gesture + overhead vision + wrist depth + collision + display
 -----------------------------------------------------------------------------------------
-Starts all seven nodes:
+Starts all eight nodes:
   leader           so101_ros2_pub   /dev/ttyACM1
   follower         so101_ros2_sub   /dev/ttyACM0
   gesture_node     idle animation + /gesture_active mux
@@ -11,6 +11,7 @@ Starts all seven nodes:
                    (started 3 s after launch)
   frame_display    OpenCV split view for overhead + wrist depth
                    (started 5 s after launch)
+  robot_state_pub  publishes /tf for Foxglove via foxglove-bridge snap (no custom SDK)
 
 Usage:
     ros2 launch so101_ros2 full_demo_launch.py
@@ -18,6 +19,8 @@ Usage:
     ros2 launch so101_ros2 full_demo_launch.py camera_device:=/dev/video4
     ros2 launch so101_ros2 full_demo_launch.py table_height_m:=0.74
 """
+
+import os
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
@@ -27,9 +30,16 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 
+    # Read URDF at launch time (before any nodes start) for robot_state_publisher
+    _urdf_path = os.path.join(
+        os.path.expanduser('~'), 'automate-demo', 'snap-twin', 'final_twin.urdf'
+    )
+    with open(_urdf_path, 'r') as _f:
+        _robot_description = _f.read()
+
     idle_arg = DeclareLaunchArgument(
         'idle_timeout',
-        default_value='30.0',
+        default_value='15.0',
         description='Seconds of no teleop input before gesture mode starts (float)',
     )
 
@@ -138,6 +148,20 @@ def generate_launch_description():
         actions=[display_node],
     )
 
+    # robot_state_publisher: computes /tf from /follower/joint_states + URDF FK.
+    # foxglove-bridge snap forwards all topics (including /tf) to Foxglove Studio
+    # automatically — no custom WebSocket SDK needed.
+    # /obstacle_markers from overhead_vision_node is also forwarded by the bridge
+    # with zero extra code.
+    robot_state_pub = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        name='robot_state_publisher',
+        output='screen',
+        parameters=[{'robot_description': _robot_description}],
+        remappings=[('joint_states', '/follower/joint_states')],
+    )
+
     return LaunchDescription([
         idle_arg,
         engine_arg,
@@ -150,4 +174,5 @@ def generate_launch_description():
         depth_node,
         collision_delayed,
         display_delayed,
+        robot_state_pub,
     ])
