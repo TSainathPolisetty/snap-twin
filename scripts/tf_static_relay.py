@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# NOT CURRENTLY USED — foxglove_bridge runs natively as the ubuntu user inside
+# start_gesture_demo.sh, bypassing snap isolation. This means robot_state_publisher
+# and foxglove_bridge share the same DDS participant and TRANSIENT_LOCAL /tf_static
+# is delivered correctly without any relay.
+# Keep as fallback if the native bridge approach stops working (e.g. after a snap
+# update changes the binary path or library layout).
 """
 tf_static_relay.py — republish /tf_static on volatile /tf at 2 Hz.
 

@@ -1,14 +1,27 @@
 import os
 import time
-import rclpy
-import numpy as np
-import foxglove
-from rclpy.node import Node
-from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool
-from yourdfpy import URDF
-from scipy.spatial.transform import Rotation as R
-from foxglove.schemas import FrameTransforms, FrameTransform, Vector3, Quaternion
+import sys
+
+_MISSING = []
+try:
+    import rclpy
+    import numpy as np
+    import foxglove
+    from rclpy.node import Node
+    from sensor_msgs.msg import JointState
+    from std_msgs.msg import Bool
+    from yourdfpy import URDF
+    from scipy.spatial.transform import Rotation as R
+    from foxglove.schemas import FrameTransforms, FrameTransform, Vector3, Quaternion
+except ImportError as _e:
+    print(
+        f"ERROR: Missing dependency — {_e}\n"
+        "This script requires:\n"
+        "  pip3 install foxglove-sdk yourdfpy scipy --break-system-packages\n"
+        "It is a standby fallback for when foxglove_bridge cannot be run natively.\n"
+        "Under normal operation start_gesture_demo.sh uses foxglove_bridge instead."
+    )
+    sys.exit(1)
 
 try:
     from foxglove.messages import (

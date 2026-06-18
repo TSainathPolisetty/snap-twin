@@ -1,11 +1,12 @@
 """
 Teleop + Gesture launch
 ------------------------
-Starts leader, follower, gesture node, and digital twin bridge.
+Starts leader, follower, and gesture node.
 
-The gesture node owns /joint_states. Leader publishes to /leader/joint_states.
-After idle_timeout seconds of no teleop, the arm enters gesture mode automatically.
-Moving the leader arm resumes teleop after a smooth home return.
+The leader arm publishes to /joint_states. The follower subscribes to that
+topic and mirrors the leader. After idle_timeout seconds of no teleop, the
+follower enters gesture mode automatically. Moving the leader arm resumes
+teleop after a smooth home return.
 
 Usage:
     ros2 launch so101_ros2 teleop_gesture_launch.py

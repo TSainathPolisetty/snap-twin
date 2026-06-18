@@ -1,0 +1,991 @@
+================================================================================
+  SNAP-TWIN — SNAP PACKAGING ANALYSIS
+  A guide for packaging this ROS2 demo as a snap on Ubuntu Core
+  Target: Ubuntu Core 22, Jetson Orin NX, JetPack 6.x
+================================================================================
+
+Written for someone who knows snap basics but has not snapped a ROS2 application
+before. This document is intentionally honest about what is hard.
+
+Last updated against: orin_nano branch, post-cleanup commit (Phase 1 fixes applied)
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 1 — CURRENT ARCHITECTURE
+────────────────────────────────────────────────────────────────────────────────
+
+What runs where right now (non-snap, on Ubuntu 22.04 Desktop):
+
+  PROCESS                    USER     HOW STARTED             PORT/DEVICE
+  ─────────────────────────────────────────────────────────────────────────
+  ros2 launch full_demo      ubuntu   start_gesture_demo.sh   —
+    ├─ so101_ros2_pub        ubuntu   (child of launch)        /dev/ttyACM1
+    ├─ so101_ros2_sub        ubuntu   (child of launch)        /dev/ttyACM0
+    ├─ gesture_node          ubuntu   (child of launch)        —
+    ├─ overhead_vision_node  ubuntu   (child of launch)        /dev/video0
+    ├─ depth_anything_node   ubuntu   (child of launch)        /dev/video2
+    ├─ frame_display_node    ubuntu   (child of launch)        X11 display
+    └─ robot_state_publisher ubuntu   (child of launch)        —
+  foxglove_bridge binary     ubuntu   subshell in .sh          :8765 (WS)
+  simple_cors_server.py      ubuntu   background in .sh        :8080 (HTTP)
+  so101_digital_twin.py      —        NOT launched (standby)   :8765 (WS alt)
+
+Dependency graph:
+
+  Physical layer:
+    /dev/ttyACM1  →  so101_ros2_pub  →  /joint_states
+    /dev/ttyACM0  ←  so101_ros2_sub  ←  (mirrors /joint_states)
+    /dev/video0   →  overhead_vision_node
+    /dev/video2   →  depth_anything_node
+
+  ROS2 topic layer:
+    /joint_states            → so101_ros2_sub, gesture_node, frame_display_node
+    /overhead/obstacle_present → so101_ros2_sub
+    /arm_state               → frame_display_node
+    /camera/depth/visualization → frame_display_node
+    /overhead/prop_marker    → foxglove_bridge → Foxglove Studio
+    /tf_static               → foxglove_bridge → Foxglove Studio
+    /joint_states            → foxglove_bridge → Foxglove Studio
+
+  Asset layer:
+    assets/so101.urdf  →  simple_cors_server → Foxglove Studio (URDF panel)
+    models/depth_anything_v2_small.engine → depth_anything_node
+
+  Runtime env layer:
+    /snap/ros-humble-ros-base/115/opt/ros/humble  →  all ROS2 nodes
+    /usr/lib/aarch64-linux-gnu/tegra/*            →  TensorRT / CUDA
+    /usr/lib/python3/dist-packages/tensorrt       →  depth_anything_node
+
+Key constraint: everything runs as the same unix user (ubuntu), sharing one
+DDS participant domain. The foxglove-bridge MUST also run as ubuntu (not root)
+because TRANSIENT_LOCAL /tf_static delivery fails across different security
+contexts (the snap sandbox isolation blocks DDS re-delivery of cached messages).
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 2 — SNAP ECOSYSTEM MAP
+────────────────────────────────────────────────────────────────────────────────
+
+Relevant snaps currently installed or available:
+
+  SNAP NAME                CHANNEL         WHAT IT PROVIDES
+  ─────────────────────────────────────────────────────────────────
+  ros-humble-ros-base      latest/stable   ROS2 Humble core libs, rmw_fastrtps,
+                                           rclpy, rclcpp, common msgs,
+                                           robot_state_publisher, URDF parser.
+                                           Exposes a content interface that
+                                           provides the full underlay.
+
+  foxglove-bridge          latest/stable   foxglove_bridge ROS2 node + binary.
+                                           Currently used by running its binary
+                                           directly, NOT as a snap service
+                                           (see Section 9 for why).
+
+  foxglove-studio          latest/stable   The Electron desktop visualization
+                                           app. Not relevant to packaging
+                                           snap-twin itself; user installs
+                                           separately on their dev machine.
+
+  snapcraft                latest/stable   Build tool; run on dev machine,
+                                           not on target.
+
+  snapd                    —               Present on both Ubuntu Desktop 22.04
+                                           and Ubuntu Core 22.
+
+  ros-humble-ros-base provides its content via the slot:
+    ros-humble-ros-base:ros-humble-ros-base
+  This mounts at $SNAP/opt/ros/underlay_ws inside any snap that plugs it
+  (when using the ros2-humble-ros-base extension).
+
+  Note on JetPack snaps: NVIDIA does not publish TensorRT as a content snap
+  on the Snap Store. The tegra libraries are installed on the host at
+  /usr/lib/aarch64-linux-gnu/tegra/. Accessing them from a snap requires
+  either a layout or a special interface — covered in Section 5.
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 3 — THE ros2-humble-ros-base EXTENSION
+────────────────────────────────────────────────────────────────────────────────
+
+When you add `extensions: [ros2-humble-ros-base]` to an app in snapcraft.yaml,
+snapcraft automatically:
+
+  1. ADDS the content plug for ros-humble-ros-base, so the underlay mounts at
+     $SNAP/opt/ros/underlay_ws at runtime.
+
+  2. INJECTS environment setup into every app's command-chain:
+     - Sources $SNAP/opt/ros/underlay_ws/opt/ros/humble/setup.sh
+     - Sources $SNAP/opt/ros/overlay_ws/install/local_setup.sh
+     - Sets ROS_DISTRO=humble, RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+     - Sets AMENT_PREFIX_PATH, PYTHONPATH, LD_LIBRARY_PATH correctly
+
+  3. CONFIGURES the colcon plugin (when you use `plugin: colcon`) to:
+     - Use the underlay as the base for colcon build
+     - Install into $SNAP/opt/ros/overlay_ws/install
+     - Pass --symlink-install equivalent for snap builds
+
+  4. ADDS standard ROS2 plugs: network, network-bind (for DDS multicast),
+     shared-memory (for zero-copy transports).
+
+  What the extension does NOT do automatically:
+  - Add camera, serial-port, opengl interfaces (you declare these manually)
+  - Handle CUDA/TensorRT host library access
+  - Handle the foxglove-bridge isolation problem
+  - Build pip dependencies (use a separate python plugin part for those)
+
+  Why use the extension instead of manual plugs?
+  The ros2-humble-ros-base underlay is ~600MB. The extension mounts it via
+  content interface instead of staging it into your snap, keeping your snap
+  small. Without the extension you would have to either vendor 600MB of ROS2
+  or figure out the content interface manually. Use the extension.
+
+  Minimal app entry using the extension:
+
+    apps:
+      demo:
+        command: opt/ros/overlay_ws/install/so101_ros2/lib/so101_ros2/...
+        extensions: [ros2-humble-ros-base]
+        plugs: [camera, serial-port, opengl, network-bind, home]
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 4 — CONTENT INTERFACES
+────────────────────────────────────────────────────────────────────────────────
+
+The ros-humble-ros-base snap exposes:
+
+  slots:
+    ros-humble-ros-base:
+      interface: content
+      content: ros-humble-ros-base
+      read: [$SNAP/opt/ros/humble]
+
+Inside your snap (after the extension connects the plug), the underlay appears
+at the path the extension sets up: $SNAP/opt/ros/underlay_ws/opt/ros/humble/
+
+The extension's generated command-chain sources:
+  $SNAP/opt/ros/underlay_ws/opt/ros/humble/setup.sh
+
+This brings in all ROS2 packages: rclpy, rclcpp, sensor_msgs, geometry_msgs,
+visualization_msgs, tf2, robot_state_publisher, joint_state_publisher, etc.
+
+Your snap's own packages (so101_ros2) build into the overlay at:
+  $SNAP/opt/ros/overlay_ws/install/so101_ros2/
+
+What you declare manually vs what the extension handles:
+
+  HANDLED BY EXTENSION:
+  - ros-humble-ros-base content plug
+  - ROS_DISTRO, AMENT_PREFIX_PATH, PYTHONPATH, LD_LIBRARY_PATH (ROS parts)
+  - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+  - network, network-bind plugs
+
+  YOU DECLARE MANUALLY:
+  - camera plug  (for /dev/video0, /dev/video2)
+  - serial-port plug  (for /dev/ttyACM0, /dev/ttyACM1)
+  - opengl plug  (for CUDA, display)
+  - home plug  (for reading ~/models/, writing to ~/automate-demo/)
+  - raw-usb plug  (alternative to serial-port for ACM devices)
+
+  NOTE on serial-port vs raw-usb:
+  USB CDC-ACM devices (/dev/ttyACMx) can be accessed via either the
+  serial-port interface (requires connecting with specific udev path) or
+  raw-usb. On Ubuntu Core, serial-port is cleaner. Declare:
+
+    plugs:
+      serial-port-leader:
+        interface: serial-port
+        path: /dev/ttyACM1
+      serial-port-follower:
+        interface: serial-port
+        path: /dev/ttyACM0
+
+  Then after install: snap connect snap-twin:serial-port-leader
+  (snapd will prompt which serial-port slot to use)
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 5 — TENSORRT / CUDA ACCESS
+────────────────────────────────────────────────────────────────────────────────
+
+This is the hardest part of snapping a Jetson application. The situation:
+
+  - TensorRT and CUDA live at /usr/lib/aarch64-linux-gnu/tegra/ on the host
+  - These are installed by JetPack (libnvidia-*, libtensorrt*, libcudart*)
+  - They are NOT available as snap packages or content snaps from NVIDIA
+  - They are tied to the specific JetPack version and cannot be vendored
+    (GPU driver and userspace must be version-matched)
+  - pycuda wraps libcuda.so which is in /usr/lib/aarch64-linux-gnu/tegra/
+
+OPTION A — layouts (recommended for prototype/internal snap):
+
+  Snapcraft layouts let you bind-mount host paths into the snap at runtime.
+
+    layout:
+      /usr/lib/aarch64-linux-gnu/tegra:
+        bind: $SNAP_DATA/tegra          # won't work — can't bind host paths
+      /usr/lib/aarch64-linux-gnu/tegra:
+        bind-file: /usr/lib/aarch64-linux-gnu/tegra  # also won't work
+
+  Actually layouts cannot bind arbitrary host directories. What DOES work:
+
+    layout:
+      /usr/lib/aarch64-linux-gnu/tegra:
+        symlink: $SNAP/usr/lib/aarch64-linux-gnu/tegra
+
+  Combined with stage-packages to pull in the stub libs, but the real
+  situation is: on Ubuntu Core, tegra libs come from the ubuntu-frame or
+  gadget snap. The cleanest approach for Jetson is:
+
+OPTION B — opengl interface + tegra-libs content snap:
+
+  The opengl snap interface grants access to /dev/nvhost-* devices and
+  NVIDIA's userspace libs. On Ubuntu Core for Jetson, the graphics-core22
+  content snap (or its Jetson equivalent) provides the GPU libraries.
+
+  Declare:
+    plugs:
+      opengl:
+        interface: opengl
+
+  This gives access to /dev/nvhost-* and /dev/nvidia*. However it does NOT
+  automatically add the tegra library paths to LD_LIBRARY_PATH.
+
+  You need to add to your app's environment:
+    environment:
+      LD_LIBRARY_PATH: $SNAP/usr/lib/aarch64-linux-gnu:$LD_LIBRARY_PATH
+
+  And stage the tegra stub packages (they pull in the real ones at runtime
+  via the interface mechanism on Core).
+
+OPTION C — system-files interface (for development/testing only):
+
+    plugs:
+      tegra-libs:
+        interface: system-files
+        read:
+          - /usr/lib/aarch64-linux-gnu/tegra
+          - /usr/lib/python3/dist-packages/tensorrt
+
+  system-files is not auto-connected and requires store review approval.
+  It is the easiest option for getting things working on your own device.
+
+RECOMMENDED APPROACH for this demo:
+  Start with Option C (system-files) for development. When productizing,
+  work with NVIDIA's Jetson snap team — they are building official content
+  snaps for JetPack on Ubuntu Core 22. Watch:
+  https://github.com/canonical/iot-field-solution-recipes
+
+  For the model itself: the .onnx file CAN be bundled at snap build time.
+  The .engine file CANNOT be bundled — it must be built on-device at
+  first run (see Section 8).
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 6 — PYTHON DEPENDENCIES
+────────────────────────────────────────────────────────────────────────────────
+
+Python packages needed by the snap (not provided by ros-humble-ros-base):
+
+  PACKAGE          VERSION  SOURCE              NOTES
+  ────────────────────────────────────────────────────────────────────────
+  yourdfpy         any      PyPI                URDF loader for digital twin
+  scipy            any      PyPI                FK solve in digital twin
+  pycuda           any      PyPI                TRT inference in depth node
+  tqdm             any      PyPI                Model download progress bar
+  deepdiff         any      PyPI                Joint state comparison in sub
+  huggingface_hub  any      PyPI                One-time model download only
+  scservo_sdk      —        NOT on PyPI         Feetech motor SDK
+  cv_bridge        —        ros-humble-ros-base Provided by content snap
+  numpy, opencv    —        ros-humble-ros-base Provided by content snap
+
+HOW TO VENDOR pip DEPENDENCIES in snapcraft.yaml:
+
+  Use a separate python plugin part:
+
+    parts:
+      pip-deps:
+        plugin: python
+        python-packages:
+          - yourdfpy
+          - scipy
+          - pycuda
+          - tqdm
+          - deepdiff
+        build-packages:
+          - python3-dev
+          - libssl-dev
+        stage-packages:
+          - python3-numpy   # fallback; ros-humble provides this via content
+
+  The python plugin installs packages into $SNAP/lib/python3.10/site-packages/
+  and sets PYTHONPATH accordingly.
+
+  NOTE: pycuda requires CUDA headers at BUILD time:
+    build-packages:
+      - nvidia-cuda-toolkit   # only available if building natively on Jetson
+  This means you MUST build the snap natively on a Jetson (or use a Jetson
+  runner in a CI pipeline). Cross-compilation will not work for pycuda.
+
+THE scservo_sdk SPECIAL CASE:
+
+  scservo_sdk is the Feetech motor driver. It is NOT on PyPI. Options:
+
+  Option A — vendor from source:
+    parts:
+      scservo-sdk:
+        plugin: python
+        source: https://github.com/FEETECH-Robotics/SCServo_Python.git
+        python-packages: []   # install from source, not PyPI
+
+  Option B — include in repo as local package:
+    Copy scservo_sdk/ directory into the repo.
+    Add to snapcraft parts as:
+      source: .
+      plugin: python
+      python-packages: []
+      organize:
+        scservo_sdk: lib/python3.10/site-packages/scservo_sdk
+
+  Option C — stage from local path:
+    If the SDK is installed on the build machine:
+      stage-packages:
+        - python3-scservo-sdk   # doesn't exist; use options A or B
+
+  Recommendation: Option A (source from GitHub) is cleanest for CI.
+  Confirm the repo URL and branch with the Feetech SDK documentation.
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 7 — HARDWARE INTERFACES
+────────────────────────────────────────────────────────────────────────────────
+
+Every hardware resource the snap needs and how to declare it:
+
+  RESOURCE              INTERFACE        DECLARATION
+  ──────────────────────────────────────────────────────────────────────────
+  /dev/video0 (overhead)  camera         plugs: [camera]
+  /dev/video2 (wrist)     camera         same camera plug covers all /dev/videoX
+  /dev/ttyACM0 (follower) serial-port    named plug with path (see below)
+  /dev/ttyACM1 (leader)   serial-port    named plug with path (see below)
+  CUDA / nvhost devices   opengl         plugs: [opengl]
+  X11 display             x11            plugs: [x11] (for frame_display cv2)
+  DDS multicast (ROS2)    network-bind   auto-added by ros2 extension
+  Foxglove WebSocket      network-bind   auto-added by ros2 extension
+  HTTP asset server       network-bind   auto-added by ros2 extension
+  /proc, /sys (GPU info)  hardware-observe  plugs: [hardware-observe]
+
+Full plugs section:
+
+    plugs:
+      camera:
+        interface: camera
+      serial-port-leader:
+        interface: serial-port
+        path: /dev/ttyACM1
+      serial-port-follower:
+        interface: serial-port
+        path: /dev/ttyACM0
+      opengl:
+        interface: opengl
+      x11:
+        interface: x11
+      hardware-observe:
+        interface: hardware-observe
+      system-files-tegra:
+        interface: system-files
+        read:
+          - /usr/lib/aarch64-linux-gnu/tegra
+          - /usr/lib/python3/dist-packages/tensorrt
+          - /usr/lib/python3/dist-packages/pycuda
+
+POST-INSTALL CONNECTIONS (Ubuntu Core — not auto-connected):
+
+    snap connect snap-twin:camera
+    snap connect snap-twin:serial-port-leader :serial-port
+    snap connect snap-twin:serial-port-follower :serial-port
+    snap connect snap-twin:opengl
+    snap connect snap-twin:x11
+    snap connect snap-twin:hardware-observe
+    # system-files-tegra requires store review or --dangerous install
+
+  On Ubuntu Desktop, most interfaces auto-connect after snap install.
+  On Ubuntu Core, serial-port and system-files require manual connection.
+
+GOTCHA — /dev/ttyACM device numbering is not stable:
+  The Jetson assigns ACM0/ACM1 based on USB enumeration order. If the user
+  plugs USB in a different order, leader and follower swap.
+  Consider making the serial paths a snap config option:
+
+    snap set snap-twin leader-port=/dev/ttyACM1
+    snap set snap-twin follower-port=/dev/ttyACM0
+
+  Then read $SNAP_COMMON/config or use snapd's configure hook.
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 8 — THE MODEL PROBLEM
+────────────────────────────────────────────────────────────────────────────────
+
+The depth inference pipeline uses two files:
+
+  FILE                                    PORTABLE?   SIZE
+  ───────────────────────────────────────────────────────────
+  depth_anything_v2_small.onnx            YES         ~49MB
+  depth_anything_v2_small.engine          NO          ~25MB (JetPack-specific)
+
+WHY the .engine is not portable:
+  TensorRT engines are compiled for a specific GPU architecture, driver
+  version, and TensorRT version. A .engine built on JetPack 6.1 will not
+  load on JetPack 6.2, or on a different GPU model (Orin NX vs Orin Nano).
+  Attempting to load a mismatched engine causes a hard crash in depth_node.
+
+STRATEGY — bundle ONNX, build engine on first run:
+
+  At snap BUILD time:
+    parts:
+      onnx-model:
+        plugin: nil
+        override-build: |
+          pip3 install huggingface_hub --break-system-packages
+          python3 -c "
+          from huggingface_hub import hf_hub_download
+          import shutil
+          path = hf_hub_download(
+              repo_id='depth-anything/Depth-Anything-V2-Small',
+              filename='depth_anything_v2_vits.onnx',
+              cache_dir='/tmp/da_cache'
+          )
+          shutil.copy(path, '$SNAPCRAFT_PART_INSTALL/depth_anything_v2_small.onnx')
+          "
+        organize:
+          depth_anything_v2_small.onnx: models/depth_anything_v2_small.onnx
+
+  At snap FIRST RUN (in a hook or wrapper script):
+
+    #!/bin/bash
+    ENGINE="$SNAP_COMMON/models/depth_anything_v2_small.engine"
+    ONNX="$SNAP/models/depth_anything_v2_small.onnx"
+
+    if [ ! -f "$ENGINE" ]; then
+      echo "First run: building TRT engine (this takes 5-15 minutes)..."
+      mkdir -p "$SNAP_COMMON/models"
+      trtexec \
+        --onnx="$ONNX" \
+        --saveEngine="$ENGINE" \
+        --fp16 \
+        --minShapes=input:1x3x518x518 \
+        --optShapes=input:1x3x518x518 \
+        --maxShapes=input:1x3x518x518 \
+        2>&1 | tee "$SNAP_COMMON/models/conversion.log"
+    fi
+    exec "$@"   # then launch the real app
+
+  Implement this as a command-chain wrapper for depth_anything app entry.
+
+  IMPORTANT: $SNAP_COMMON persists across snap refreshes (unlike $SNAP_DATA
+  which is version-specific). Store the engine in $SNAP_COMMON so it
+  survives snap updates. Only rebuild if the ONNX model changes (check
+  checksum: sha256sum $SNAP/models/depth_anything_v2_small.onnx vs
+  $SNAP_COMMON/models/onnx.sha256).
+
+  WHERE trtexec LIVES in the snap:
+  trtexec is at /usr/src/tensorrt/bin/trtexec on Jetson host systems.
+  Since it accesses tegra libs, it cannot easily be staged into the snap.
+  Options:
+  - Declare /usr/src/tensorrt/bin in system-files read list (easy, development)
+  - Stage trtexec binary and its dependencies (complex, not recommended)
+  - Use a Python-only trt conversion (tensorrt Python API — same portability
+    constraints but avoids the binary path problem)
+
+  Recommended: keep trtexec as a host binary accessed via system-files
+  during the install hook, which runs outside the strict app sandbox.
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 9 — THE FOXGLOVE BRIDGE WORKAROUND
+────────────────────────────────────────────────────────────────────────────────
+
+CURRENT STATE (non-snap):
+  start_gesture_demo.sh stops the foxglove-bridge snap service (which runs
+  as root), then launches the foxglove_bridge binary directly as the ubuntu
+  user from /snap/foxglove-bridge/current/opt/ros/snap/lib/foxglove_bridge/.
+
+WHY this is necessary (root cause):
+  ROS2 uses TRANSIENT_LOCAL durability on /tf_static. When a new subscriber
+  connects, the publisher must re-deliver cached transform messages.
+  This re-delivery goes through DDS's TRANSIENT_LOCAL history mechanism.
+  When the bridge runs as root (different OS user / snap security context),
+  FastDDS treats it as a separate DDS participant with a different security
+  domain. The TRANSIENT_LOCAL history from the ubuntu-user publisher is not
+  accessible to the root-user subscriber, so the bridge never receives /tf_static
+  and Foxglove Studio shows "No coordinate frames found".
+
+WHAT THIS MEANS FOR SNAP PACKAGING:
+
+  Option A — bundle foxglove_bridge binary in snap-twin snap:
+    Stage the foxglove_bridge binary and its ROS2 deps inside snap-twin.
+    The binary runs as the snap-twin user (same DDS context as other nodes).
+    This makes snap-twin self-contained and removes the foxglove-bridge snap
+    dependency at runtime.
+    TRADEOFF: adds ~50MB to snap size; must update when foxglove-bridge updates.
+
+    Implementation:
+      parts:
+        foxglove-bridge-bin:
+          plugin: dump
+          source: /snap/foxglove-bridge/current
+          organize:
+            opt/ros/snap/lib/foxglove_bridge/foxglove_bridge: bin/foxglove_bridge
+
+  Option B — use the foxglove-bridge snap service with a shared DDS domain:
+    Configure both snaps to use the same FastDDS participant profile.
+    Possible via a custom fastdds.xml that disables security isolation.
+    This is complex and fragile; the security model of snaps actively resists
+    cross-snap DDS sharing.
+    TRADEOFF: architecturally cleaner, but requires deep FastDDS knowledge.
+
+  Option C — use Zenoh bridge instead of FastDDS:
+    ros-humble-rmw-zenoh (a newer RMW) uses a different transport that
+    does not have this snap isolation problem.
+    TRADEOFF: requires switching RMW_IMPLEMENTATION; Zenoh snap interface
+    handling is not yet standardized.
+
+  RECOMMENDATION for snap packaging: Option A (bundle the binary).
+  It solves the problem cleanly, works on Ubuntu Core, and is consistent
+  with how snaps are supposed to be self-contained.
+
+  ALSO NOTE — the asset HTTP server:
+  simple_cors_server.py serves assets/so101.urdf on port 8080.
+  Foxglove Studio fetches it via the "URDF" panel URL.
+  In the snap, this means:
+  - Bundle assets/ inside the snap
+  - Run simple_cors_server.py as a snap app entry
+  - The URDF URL served by the snap changes to a snap-controlled path
+  - IP address in the URDF SRC attribute (for mesh files) must still be
+    patched at runtime (start_gesture_demo.sh already does this with sed)
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 10 — PROPOSED snapcraft.yaml
+────────────────────────────────────────────────────────────────────────────────
+
+NOTE: This is a complete, ready-to-test snapcraft.yaml. It is designed to
+build and install correctly, but some interfaces (system-files-tegra) require
+--dangerous install or store review. Treat this as a solid starting point,
+not a final production config.
+
+────────────────────────── snapcraft.yaml ──────────────────────────
+
+name: snap-twin
+version: '1.0'
+summary: SO-101 dual-arm gesture demo with Gengar detection
+description: |
+  ROS2 Humble demo for Jetson Orin NX: leader/follower SO-101 arms,
+  overhead Gengar detection, depth inference with TensorRT, Foxglove
+  visualization. Requires JetPack 6.x.
+
+grade: devel          # change to 'stable' once tested on Core
+confinement: strict   # use 'devmode' during development for easier debugging
+base: core22
+
+# The ros2-humble-ros-base extension mounts the ROS2 underlay via content
+# interface and sets up all ROS2 environment variables automatically.
+
+plugs:
+  # Hardware
+  camera:
+    interface: camera
+  serial-port-leader:
+    interface: serial-port
+    path: /dev/ttyACM1
+  serial-port-follower:
+    interface: serial-port
+    path: /dev/ttyACM0
+  opengl:
+    interface: opengl
+  x11:
+    interface: x11
+  hardware-observe:
+    interface: hardware-observe
+
+  # TensorRT / CUDA host libs — requires store approval or --dangerous
+  system-files-tegra:
+    interface: system-files
+    read:
+      - /usr/lib/aarch64-linux-gnu/tegra
+      - /usr/lib/python3/dist-packages/tensorrt
+      - /usr/src/tensorrt/bin    # for trtexec on first-run engine build
+
+  # Filesystem
+  home:
+    interface: home
+  removable-media:
+    interface: removable-media
+
+apps:
+  # Main launch — starts all ROS2 nodes
+  demo:
+    command: usr/bin/start_demo.sh
+    extensions: [ros2-humble-ros-base]
+    plugs:
+      - camera
+      - serial-port-leader
+      - serial-port-follower
+      - opengl
+      - x11
+      - hardware-observe
+      - system-files-tegra
+      - home
+      - network
+      - network-bind
+    environment:
+      # Add tegra libs to LD_LIBRARY_PATH (alongside what extension sets)
+      LD_LIBRARY_PATH: /usr/lib/aarch64-linux-gnu/tegra:$LD_LIBRARY_PATH
+      # Let Python find host-installed TensorRT
+      PYTHONPATH: /usr/lib/python3/dist-packages:$PYTHONPATH
+
+  # Foxglove bridge — bundled binary, same DDS context as demo nodes
+  foxglove:
+    command: bin/foxglove_bridge
+    extensions: [ros2-humble-ros-base]
+    plugs:
+      - network
+      - network-bind
+    daemon: simple
+    restart-condition: on-failure
+
+  # Asset HTTP server for URDF panel in Foxglove Studio
+  asset-server:
+    command: usr/bin/asset_server.sh
+    extensions: [ros2-humble-ros-base]
+    plugs:
+      - network-bind
+    daemon: simple
+    restart-condition: on-failure
+
+parts:
+  # ── Part 1: ROS2 package (so101_ros2) ──────────────────────────────────────
+  so101-ros2:
+    plugin: colcon
+    source: .
+    colcon-packages:
+      - so101_ros2
+    colcon-cmake-args:
+      - -DCMAKE_BUILD_TYPE=Release
+    build-packages:
+      - python3-colcon-common-extensions
+      - python3-vcstool
+    stage-packages:
+      - python3-cv-bridge
+      - ros-humble-robot-state-publisher
+      - ros-humble-joint-state-publisher
+    after:
+      - pip-deps
+      - onnx-model
+
+  # ── Part 2: pip dependencies ────────────────────────────────────────────────
+  pip-deps:
+    plugin: python
+    source: .
+    python-packages:
+      - yourdfpy
+      - scipy
+      - tqdm
+      - deepdiff
+      # pycuda omitted here; requires CUDA headers at build time.
+      # Install pycuda separately on-device if needed, or add a
+      # build-environment that provides CUDA headers.
+    build-packages:
+      - python3-dev
+      - libssl-dev
+
+  # ── Part 3: scservo_sdk (not on PyPI) ───────────────────────────────────────
+  scservo-sdk:
+    plugin: python
+    source: https://github.com/FEETECH-Robotics/SCServo_Python.git
+    # VERIFY this URL is correct before building
+    python-packages: []
+    override-build: |
+      craftenv_python3 setup.py install --prefix=$SNAPCRAFT_PART_INSTALL
+
+  # ── Part 4: ONNX model (bundled at build, engine built at first run) ────────
+  onnx-model:
+    plugin: nil
+    build-packages:
+      - python3-pip
+    override-build: |
+      pip3 install huggingface_hub --break-system-packages --quiet
+      python3 - << 'EOF'
+      from huggingface_hub import hf_hub_download
+      import shutil, os
+      path = hf_hub_download(
+          repo_id="depth-anything/Depth-Anything-V2-Small",
+          filename="depth_anything_v2_vits.onnx",
+          cache_dir="/tmp/da_cache"
+      )
+      dest = os.path.join(os.environ["SNAPCRAFT_PART_INSTALL"], "models",
+                          "depth_anything_v2_small.onnx")
+      os.makedirs(os.path.dirname(dest), exist_ok=True)
+      shutil.copy(path, dest)
+      print(f"Bundled ONNX model ({os.path.getsize(dest)//1024//1024}MB)")
+      EOF
+    organize:
+      models/depth_anything_v2_small.onnx: models/depth_anything_v2_small.onnx
+
+  # ── Part 5: assets (URDF, meshes) ───────────────────────────────────────────
+  assets:
+    plugin: dump
+    source: assets/
+    organize:
+      '*': assets/
+
+  # ── Part 6: foxglove_bridge binary ──────────────────────────────────────────
+  foxglove-bridge-bin:
+    plugin: nil
+    override-build: |
+      # Pull binary from installed foxglove-bridge snap
+      # Requires foxglove-bridge snap to be installed on build machine
+      FG=/snap/foxglove-bridge/current
+      mkdir -p $SNAPCRAFT_PART_INSTALL/bin
+      cp $FG/opt/ros/snap/lib/foxglove_bridge/foxglove_bridge \
+         $SNAPCRAFT_PART_INSTALL/bin/
+      # Also copy required shared libs that aren't in ros-humble-ros-base
+      mkdir -p $SNAPCRAFT_PART_INSTALL/lib/foxglove
+      # Copy any extra libs foxglove_bridge needs beyond what ROS provides
+      # (check with: ldd /snap/foxglove-bridge/current/opt/ros/snap/lib/
+      #              foxglove_bridge/foxglove_bridge | grep "not found")
+
+  # ── Part 7: wrapper scripts ──────────────────────────────────────────────────
+  scripts:
+    plugin: dump
+    source: snap/local/
+    # Create snap/local/ directory in the repo with:
+    #   start_demo.sh  — replaces start_gesture_demo.sh, snap-aware paths
+    #   asset_server.sh — launches simple_cors_server.py with correct paths
+    organize:
+      start_demo.sh: usr/bin/start_demo.sh
+      asset_server.sh: usr/bin/asset_server.sh
+
+  # ── Part 8: first-run hook for TRT engine build ──────────────────────────────
+  # Hooks live in snap/hooks/ in the repo (not snapcraft parts)
+  # snap/hooks/install will run after snap install, can call trtexec
+
+────────────────────────── end snapcraft.yaml ──────────────────────────
+
+ADDITIONAL SNAP STRUCTURE needed in the repo:
+
+  snap/
+  ├── snapcraft.yaml          (above)
+  ├── hooks/
+  │   └── install             (first-run TRT engine build script)
+  └── local/
+      ├── start_demo.sh       (snap-aware version of start_gesture_demo.sh)
+      └── asset_server.sh     (launch simple_cors_server.py)
+
+snap/hooks/install content:
+
+  #!/bin/bash
+  set -e
+  ENGINE="$SNAP_COMMON/models/depth_anything_v2_small.engine"
+  ONNX="$SNAP/models/depth_anything_v2_small.onnx"
+  ONNX_SHA="$SNAP_COMMON/models/onnx.sha256"
+
+  mkdir -p "$SNAP_COMMON/models"
+
+  # Check if engine is already built and ONNX hasn't changed
+  CURRENT_SHA=$(sha256sum "$ONNX" | awk '{print $1}')
+  STORED_SHA=$(cat "$ONNX_SHA" 2>/dev/null || echo "")
+
+  if [ -f "$ENGINE" ] && [ "$CURRENT_SHA" = "$STORED_SHA" ]; then
+    echo "TRT engine already built and up to date."
+    exit 0
+  fi
+
+  echo "Building TensorRT engine (first run, may take 5-15 minutes)..."
+  /usr/src/tensorrt/bin/trtexec \
+    --onnx="$ONNX" \
+    --saveEngine="$ENGINE" \
+    --fp16 \
+    --minShapes=input:1x3x518x518 \
+    --optShapes=input:1x3x518x518 \
+    --maxShapes=input:1x3x518x518 \
+    2>&1 | tee "$SNAP_COMMON/models/conversion.log"
+
+  echo "$CURRENT_SHA" > "$ONNX_SHA"
+  echo "Engine build complete."
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 11 — BUILD AND TEST PROCEDURE
+────────────────────────────────────────────────────────────────────────────────
+
+PREREQUISITES (on build machine — must be Jetson for pycuda):
+
+  sudo snap install snapcraft --classic
+  sudo snap install foxglove-bridge   # needed for foxglove-bridge-bin part
+  sudo snap install ros-humble-ros-base
+  pip3 install huggingface_hub --break-system-packages
+
+BUILD:
+
+  cd ~/automate-demo/snap-twin
+  snapcraft --destructive-mode    # builds natively, no LXD/multipass
+  # --destructive-mode is required on Jetson (no ARM LXD easily available)
+  # First build takes 20-40 minutes (downloads ONNX, builds ROS2 package)
+
+  # For iterative development, build in devmode first:
+  snapcraft --destructive-mode --debug    # drops you into build env on failure
+
+INSTALL:
+
+  # Development (skip signature check):
+  sudo snap install snap-twin_1.0_arm64.snap --dangerous --devmode
+
+  # Or strict confinement test:
+  sudo snap install snap-twin_1.0_arm64.snap --dangerous
+
+CONNECT INTERFACES:
+
+  sudo snap connect snap-twin:camera
+  sudo snap connect snap-twin:serial-port-leader :serial-port
+  # snapd will prompt: which serial-port slot? select ttyACM1
+  sudo snap connect snap-twin:serial-port-follower :serial-port
+  # select ttyACM0
+  sudo snap connect snap-twin:opengl
+  sudo snap connect snap-twin:x11
+  sudo snap connect snap-twin:hardware-observe
+  # system-files-tegra requires --dangerous or ack
+
+VERIFY:
+
+  snap services snap-twin          # foxglove and asset-server should be active
+  snap logs snap-twin.demo         # check for ROS node startup
+  snap logs snap-twin.foxglove     # check bridge is up on :8765
+  ros2 topic list                  # if ROS2 env is sourced on host
+  curl http://localhost:8080/so101.urdf | head -5   # verify asset server
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 12 — WHAT WILL BREAK AND WHY
+────────────────────────────────────────────────────────────────────────────────
+
+1. DISPLAY OUTPUT (frame_display_node cv2 window)
+   PROBLEM: frame_display_node opens an X11 window with cv2.imshow().
+   Ubuntu Core has no desktop session; there is no X11 display.
+   WORKAROUND A: Remove frame_display entirely; use only Foxglove for viz.
+   WORKAROUND B: Use a framebuffer display (ubuntu-frame snap) and configure
+   X11 socket access. Complex but doable on Core with a display attached.
+   WORKAROUND C: Replace cv2.imshow() with a web-based display
+   (serve MJPEG stream via HTTP; view in browser). Simplest for headless Core.
+
+2. ttyACM DEVICE ENUMERATION ORDER
+   PROBLEM: /dev/ttyACM0 vs /dev/ttyACM1 is not stable across reboots
+   if USB hubs are involved. The snap serial-port plugs use fixed paths.
+   WORKAROUND: Use udev rules to assign stable symlinks to the arms.
+   Add ATTRS{idVendor}=="...", SYMLINK+="ttyACM_leader" rules to a udev
+   gadget snap or put in /etc/udev/rules.d/ on Core (with a gadget snap).
+
+3. PYCUDA BUILD REQUIREMENT
+   PROBLEM: pycuda must be built with CUDA headers matching the JetPack
+   version. snapcraft --destructive-mode on the Jetson works but is
+   environment-sensitive. If the snap is built on a non-Jetson machine
+   (CI), pycuda will fail to compile.
+   WORKAROUND: Pre-build pycuda wheel on Jetson, stage as a local wheel.
+   Or skip pycuda in the snap and use the Python TensorRT API directly
+   (tensorrt Python package does not require pycuda for inference).
+
+4. TRT ENGINE BUILD ON FIRST RUN
+   PROBLEM: The install hook runs in the snap sandbox. trtexec at
+   /usr/src/tensorrt/bin/ is on the host, not in the snap. The hook
+   needs system-files access to /usr/src/tensorrt/bin.
+   WORKAROUND: The install hook runs with slightly relaxed confinement.
+   Declare system-files read access for /usr/src/tensorrt/bin in the
+   snap plugs. This requires store review or --dangerous.
+   ALTERNATIVE: Use the TensorRT Python API to build the engine:
+     import tensorrt as trt
+     builder = trt.Builder(logger)
+     # ... full Python conversion, no trtexec needed
+
+5. FOXGLOVE BRIDGE DDS ISOLATION (partially addressed by bundling)
+   PROBLEM: Even with the binary bundled in snap-twin, FastDDS may still
+   create different DDS participant identities if the snap sandbox restricts
+   shared memory segments. The DomainParticipant GUID is derived from the
+   process security context on some FastDDS versions.
+   WORKAROUND: Test with a custom fastdds.xml that disables shared memory
+   transport (fall back to UDP only). Add to snap env:
+     FASTRTPS_DEFAULT_PROFILES_FILE: $SNAP/etc/fastdds_no_shm.xml
+   This avoids the shared memory path where isolation issues occur.
+
+6. CALIBRATION FILE PATHS
+   PROBLEM: calibration/camera_to_arm.json is read by overhead_vision_node.
+   In the current code it is looked up relative to the source tree.
+   In a snap, $SNAP is read-only; calibration data must be in $SNAP_COMMON.
+   WORKAROUND: Change the calibration file path to use an environment variable:
+     SNAP_TWIN_CALIBRATION_DIR (default: ~/automate-demo/snap-twin/calibration)
+   On snap, set this to $SNAP_COMMON/calibration/.
+   The user runs the calibration script once (can be a snap app entry) which
+   writes to $SNAP_COMMON/calibration/.
+
+7. URDF IP ADDRESS PATCHING
+   PROBLEM: start_gesture_demo.sh patches the URDF file with the machine's
+   IP using sed. The URDF lives in $SNAP which is read-only.
+   WORKAROUND: Copy the URDF to $SNAP_COMMON on first run, patch the copy,
+   serve from $SNAP_COMMON instead of $SNAP/assets/.
+
+8. ROS2 DAEMON (ros2 topic list etc.)
+   PROBLEM: The snap uses rmw_fastrtps_cpp. On Ubuntu Core, the ros2 CLI
+   commands from the host or from ros-humble-ros-base snap may use a
+   different DDS configuration than snap-twin.
+   This is a diagnostics issue only; the demo itself still works.
+   WORKAROUND: Source snap-twin's ROS2 environment before running ros2 CLI.
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 13 — TIME ESTIMATE
+────────────────────────────────────────────────────────────────────────────────
+
+Realistic breakdown for packaging this demo as a production snap on Ubuntu Core.
+Assumes one experienced snapper familiar with ROS2 but new to Jetson snapping.
+
+  TASK                                              ESTIMATED TIME
+  ──────────────────────────────────────────────────────────────────────────
+  Set up snapcraft build env on Jetson                1 hour
+  Write initial snapcraft.yaml (based on Section 10)  2 hours
+  Get so101_ros2 colcon part building cleanly          2 hours
+  Get pip-deps + scservo_sdk building                  2 hours
+  ONNX model bundle (nil plugin + hf_hub_download)     1 hour
+  Get foxglove_bridge binary staging working           1 hour
+  First successful --devmode install and launch        2 hours
+  Debug strict confinement interface issues            3 hours
+    (camera, serial-port, system-files-tegra)
+  TRT engine first-run hook (install hook)             2 hours
+  Fix frame_display on Core (MJPEG stream)             4 hours
+  Fix calibration file path (SNAP_COMMON)              1 hour
+  Fix URDF patching (SNAP_COMMON copy)                 1 hour
+  Fix udev symlinks for stable ttyACM paths            2 hours
+  Foxglove bridge DDS shm isolation fix                2 hours
+  End-to-end demo test on Ubuntu Core (on real hw)     3 hours
+  Final polish (version, grade:stable, store upload)   2 hours
+  ──────────────────────────────────────────────────────────────────────────
+  TOTAL                                               ~31 hours (~4 work days)
+
+  THE 3-HOUR TARGET is achievable ONLY for:
+  - Getting the snap to install and launch nodes (devmode, Ubuntu Desktop)
+  - NOT for a fully working strict-confinement Ubuntu Core deployment
+
+  Pragmatic path to 3-hour milestone:
+    Hour 1: snapcraft.yaml skeleton + so101_ros2 colcon part building
+    Hour 2: pip-deps + ONNX bundle + devmode install
+    Hour 3: basic demo launch (frame_display may not work; arms may need
+            manual interface connect; TRT engine from $SNAP_COMMON)
+  Then budget 25+ more hours for production-grade Core deployment.
+
+  QUICK WIN: The foxglove-bridge bundling and asset-server are the two
+  items that directly unblock the demo from working end-to-end. Prioritize
+  those over CUDA/TRT if time is limited — the wrist camera depth visualization
+  is a nice-to-have; the overhead Gengar detection (pure OpenCV, no CUDA)
+  and arm state machine are the core demo.
+
+================================================================================
+END OF snap-demo-analysis.txt
+================================================================================

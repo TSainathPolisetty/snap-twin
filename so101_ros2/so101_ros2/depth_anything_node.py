@@ -4,9 +4,7 @@ Depth Anything V2 inference node — Jetson Orin NX
 Owns camera capture (GStreamer → cv2) and TensorRT fp16 inference.
 
 Publishes:
-  /camera/depth/image_raw         sensor_msgs/Image  encoding=32FC1  ~15 Hz
   /camera/depth/visualization     sensor_msgs/Image  encoding=rgb8   ~15 Hz
-  /camera/image_raw               sensor_msgs/Image  encoding=rgb8   ~15 Hz  (raw camera frame)
 
 Parameters:
   engine_path     (string) path to .engine file
@@ -16,8 +14,7 @@ Parameters:
 
 NOTE: publish resolution defaults to the TRT native output (518×518) for
 performance.  Upscaling to camera native (1920×1080) would produce ~14 MB
-messages and reduce frame rate to ~2.5 Hz.  The collision_checker and
-Foxglove visualisation both work fine at 518×518.
+messages and reduce frame rate to ~2.5 Hz.
 """
 
 import rclpy
@@ -55,9 +52,7 @@ class DepthAnythingNode(Node):
         self._pub_h      = int(self.get_parameter('publish_height').value)
 
         # ── Publishers ──────────────────────────────────────────────────────
-        self._depth_pub = self.create_publisher(Image, '/camera/depth/image_raw',      5)
         self._vis_pub   = self.create_publisher(Image, '/camera/depth/visualization',  5)
-        self._raw_pub   = self.create_publisher(Image, '/camera/image_raw',            5)
 
         # ── TensorRT engine + buffer allocation ─────────────────────────────
         self.get_logger().info(f'Loading TRT engine: {engine_path}')
@@ -191,19 +186,6 @@ class DepthAnythingNode(Node):
 
         now = self.get_clock().now().to_msg()
 
-        # ── Publish 32FC1 depth ───────────────────────────────────────────────
-        depth_msg                = Image()
-        depth_msg.header.stamp   = now
-        depth_msg.header.frame_id = 'wrist_link'
-        depth_msg.height         = self._pub_h
-        depth_msg.width          = self._pub_w
-        depth_msg.encoding       = '32FC1'
-        depth_msg.is_bigendian   = False
-        depth_msg.step           = self._pub_w * 4   # 4 bytes / pixel
-        # array.array('B', ...) avoids 175ms byte-by-byte Python iteration
-        depth_msg.data           = array.array('B', depth_out.astype(np.float32).tobytes())
-        self._depth_pub.publish(depth_msg)
-
         # ── Publish colorised visualisation (rgb8) ───────────────────────────
         depth_u8   = (depth_out * 255).astype(np.uint8)
         color_bgr  = cv2.applyColorMap(depth_u8, cv2.COLORMAP_INFERNO)
@@ -219,21 +201,6 @@ class DepthAnythingNode(Node):
         vis_msg.step           = self._pub_w * 3
         vis_msg.data           = array.array('B', rgb_color.tobytes())
         self._vis_pub.publish(vis_msg)
-
-        # ── Publish raw RGB camera frame (resized to publish resolution) ──────
-        rgb_raw = cv2.cvtColor(
-            cv2.resize(frame, (self._pub_w, self._pub_h), interpolation=cv2.INTER_LINEAR),
-            cv2.COLOR_BGR2RGB)
-        raw_msg                = Image()
-        raw_msg.header.stamp   = now
-        raw_msg.header.frame_id = 'wrist_link'
-        raw_msg.height         = self._pub_h
-        raw_msg.width          = self._pub_w
-        raw_msg.encoding       = 'rgb8'
-        raw_msg.is_bigendian   = False
-        raw_msg.step           = self._pub_w * 3
-        raw_msg.data           = array.array('B', rgb_raw.tobytes())
-        self._raw_pub.publish(raw_msg)
 
         self._frame_count += 1
         if self._frame_count % 30 == 0:

@@ -90,9 +90,8 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'idle_timeout': LaunchConfiguration('idle_timeout'),
-            'home_duration': 2.5,
-            'speed_scale':   0.55,
             'return_secs':   0.5,
+            'speed_scale':   0.55,
         }],
     )
 

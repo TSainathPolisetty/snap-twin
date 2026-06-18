@@ -14,7 +14,7 @@ _STATE_NORMAL    = 'NORMAL'
 _STATE_RETREATING = 'RETREATING'
 _STATE_HOLDING   = 'HOLDING'
 
-class LeRobotJointStateSubscriber(Node):
+class SO101FollowerNode(Node):
 
     # Tucked retreat pose: arm folded compact — heavy elbow flexion, wrist curled in,
     # gripper nearly closed, low rather than raised.  Values confirmed by physical test.
@@ -32,7 +32,7 @@ class LeRobotJointStateSubscriber(Node):
     MAX_STEP_DEG_PER_TICK = 8.0
 
     def __init__(self):
-        super().__init__('lerobot_subscriber')
+        super().__init__('follower_node')
 
         # Declare ROS Parameters
         self.declare_parameter('robot_name', "follower")
@@ -53,9 +53,6 @@ class LeRobotJointStateSubscriber(Node):
         self._clear_streak    = 0   # consecutive obstacle-free readings in HOLDING
         self._clear_since     = None # time.monotonic() of first consecutive-clear reading
         self._retreat_started = None # time.monotonic() when RETREATING was entered
-
-        # /overhead/obstacle_present — consulted ONLY while in HOLDING
-        self._obstacle_present = False
 
         # /overhead/obstacle_present — sole source of retreat triggers and clear gate
         self._obstacle_present = False
@@ -231,16 +228,15 @@ class LeRobotJointStateSubscriber(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    lerobot_subscriber = LeRobotJointStateSubscriber()
-    rclpy.spin(lerobot_subscriber)
-    
-    # Ensure disconnection when ROS node shuts down
-    if lerobot_subscriber.robot is not None:
-        lerobot_subscriber.get_logger().info("Disconnecting lerobot arm...")
-        lerobot_subscriber.robot.disconnect() # [cite: 2]
-        lerobot_subscriber.get_logger().info("LeRobot arm disconnected.")
+    node = SO101FollowerNode()
+    rclpy.spin(node)
 
-    lerobot_subscriber.destroy_node()
+    if node.robot is not None:
+        node.get_logger().info("Disconnecting lerobot arm...")
+        node.robot.disconnect()
+        node.get_logger().info("LeRobot arm disconnected.")
+
+    node.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':

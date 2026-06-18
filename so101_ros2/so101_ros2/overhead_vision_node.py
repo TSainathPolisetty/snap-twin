@@ -125,7 +125,6 @@ class OverheadVisionNode(Node):
         self._camera_origin_base = None
 
         self._annotated_pub = self.create_publisher(Image, '/overhead/image_annotated', 5)
-        self._early_notice_pub = self.create_publisher(Bool, '/overhead/early_notice', 10)
         self._consistency_pub = self.create_publisher(String, '/overhead/consistency_status', 10)
         self._marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
         self._obstacle_present_pub = self.create_publisher(Bool, '/overhead/obstacle_present', 10)
@@ -274,19 +273,6 @@ class OverheadVisionNode(Node):
         }
         changed = [p for p in params if p.name in gengar_names]
         if changed:
-            # Re-read all gengar params atomically
-            self._gengar_lower = np.array([
-                int(self.get_parameter('gengar_hue_low').value),
-                int(self.get_parameter('gengar_sat_low').value),
-                int(self.get_parameter('gengar_val_low').value),
-            ], dtype=np.uint8)
-            self._gengar_upper = np.array([
-                int(self.get_parameter('gengar_hue_high').value),
-                int(self.get_parameter('gengar_sat_high').value),
-                int(self.get_parameter('gengar_val_high').value),
-            ], dtype=np.uint8)
-            self._gengar_min_area = float(self.get_parameter('gengar_min_area').value)
-            # Apply the new value from the incoming params (not yet committed to server)
             for p in changed:
                 if p.name == 'gengar_hue_low':
                     self._gengar_lower[0] = int(p.value)
@@ -324,9 +310,6 @@ class OverheadVisionNode(Node):
         gengar_blob = self._extract_blob(hsv, self._gengar_lower, self._gengar_upper,
                                           min_area=self._gengar_min_area)
 
-        early_notice = self._blob_in_roi(prop_blob, frame.shape[1], frame.shape[0])
-        self._publish_bool(self._early_notice_pub, early_notice)
-
         # Gengar plushie drives /overhead/obstacle_present (replaces bg-diff)
         gengar_in_roi = self._blob_in_roi(gengar_blob, frame.shape[1], frame.shape[0])
         self._publish_bool(self._obstacle_present_pub, gengar_in_roi)
@@ -335,7 +318,7 @@ class OverheadVisionNode(Node):
         consistency_text = self._compute_consistency_status(arm_blob)
         self._publish_string(self._consistency_pub, consistency_text)
 
-        annotated = self._annotate_frame(frame, arm_blob, prop_blob, gengar_blob, early_notice, consistency_text)
+        annotated = self._annotate_frame(frame, arm_blob, prop_blob, gengar_blob, consistency_text)
         self._publish_image(annotated)
 
     def _extract_blob(self, hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray,
@@ -390,61 +373,41 @@ class OverheadVisionNode(Node):
         y2 = int(self._roi_y2 * frame_h)
         return x1 <= cx <= x2 and y1 <= cy <= y2
 
-    def _publish_marker(self, prop_blob):
-        marker_array = MarkerArray()
+    def _delete_prop_marker(self):
+        """Publish a DELETE action for the prop obstacle marker."""
+        marker = Marker()
+        marker.header.frame_id = 'base_link'
+        marker.ns = 'overhead_prop'
+        marker.id = 0
+        marker.action = Marker.DELETE
+        msg = MarkerArray()
+        msg.markers.append(marker)
+        self._marker_pub.publish(msg)
 
-        # DIAG-1: log whether prop_blob is found every tick (throttled so it doesn't spam)
-        self.get_logger().info(
+    def _publish_marker(self, prop_blob):
+        self.get_logger().debug(
             f'[diag] prop_blob found: {prop_blob is not None}'
             + (f' area={prop_blob["area"]:.0f} centroid={prop_blob["centroid"]}' if prop_blob else ''),
-            throttle_duration_sec=2.0,
         )
 
-        if prop_blob is None:
-            marker = Marker()
-            marker.header.frame_id = 'base_link'
-            marker.ns = 'overhead_prop'
-            marker.id = 0
-            marker.action = Marker.DELETE
-            marker_array.markers.append(marker)
-            self._marker_pub.publish(marker_array)
-            return
-
-        if not (self._extrinsics_loaded and self._intrinsics_loaded):
-            marker = Marker()
-            marker.header.frame_id = 'base_link'
-            marker.ns = 'overhead_prop'
-            marker.id = 0
-            marker.action = Marker.DELETE
-            marker_array.markers.append(marker)
-            self._marker_pub.publish(marker_array)
-            return
-
-        if math.isclose(self._table_height_m, PLACEHOLDER_TABLE_HEIGHT, abs_tol=1e-9):
-            self.get_logger().warn(
-                'table_height_m is still -999.0 - set it during setup before backprojection can run',
-                throttle_duration_sec=5.0,
-            )
-            marker = Marker()
-            marker.header.frame_id = 'base_link'
-            marker.ns = 'overhead_prop'
-            marker.id = 0
-            marker.action = Marker.DELETE
-            marker_array.markers.append(marker)
-            self._marker_pub.publish(marker_array)
+        if (prop_blob is None
+                or not (self._extrinsics_loaded and self._intrinsics_loaded)
+                or math.isclose(self._table_height_m, PLACEHOLDER_TABLE_HEIGHT, abs_tol=1e-9)):
+            if (prop_blob is not None
+                    and math.isclose(self._table_height_m, PLACEHOLDER_TABLE_HEIGHT, abs_tol=1e-9)):
+                self.get_logger().warn(
+                    'table_height_m is still -999.0 - set it during setup before backprojection can run',
+                    throttle_duration_sec=5.0,
+                )
+            self._delete_prop_marker()
             return
 
         point_base = self._backproject_to_table(prop_blob['centroid'])
         if point_base is None:
-            marker = Marker()
-            marker.header.frame_id = 'base_link'
-            marker.ns = 'overhead_prop'
-            marker.id = 0
-            marker.action = Marker.DELETE
-            marker_array.markers.append(marker)
-            self._marker_pub.publish(marker_array)
+            self._delete_prop_marker()
             return
 
+        marker_array = MarkerArray()
         marker = Marker()
         marker.header.stamp = self.get_clock().now().to_msg()
         marker.header.frame_id = 'base_link'
@@ -470,23 +433,9 @@ class OverheadVisionNode(Node):
         marker.lifetime = Duration(seconds=1.0).to_msg()
         marker_array.markers.append(marker)
 
-        # DIAG-2: log full (x, y, z) in base_link before publishing
-        # DIAG-3: log URDF first-joint resting height as reference for "above base" rendering in Foxglove
-        first_joint_z = 'N/A'
-        if self._robot is not None:
-            try:
-                first_j = next(
-                    (j for j in self._robot.robot.joints if j.type == 'revolute'), None
-                )
-                if first_j is not None:
-                    tf_j = self._robot.get_transform(frame_to=first_j.child, frame_from='base_link')
-                    first_joint_z = f'{float(tf_j[2, 3]):.4f} ({first_j.child})'
-            except Exception:
-                pass
-        self.get_logger().info(
+        self.get_logger().debug(
             f'[diag] marker pos base_link: x={point_base[0]:.4f} y={point_base[1]:.4f} '
-            f'z={point_base[2]:.4f} | first_joint_z_in_base={first_joint_z} | table_height_m={self._table_height_m}',
-            throttle_duration_sec=2.0,
+            f'z={point_base[2]:.4f} | table_height_m={self._table_height_m}',
         )
 
         self._marker_pub.publish(marker_array)
@@ -552,13 +501,9 @@ class OverheadVisionNode(Node):
         return float(u), float(v)
 
     def _annotate_frame(self, frame: np.ndarray, arm_blob, prop_blob, gengar_blob,
-                        early_notice: bool, consistency_text: str) -> np.ndarray:
+                        consistency_text: str) -> np.ndarray:
         annotated = frame.copy()
         frame_h, frame_w = annotated.shape[:2]
-        roi_x1 = int(self._roi_x1 * frame_w)
-        roi_y1 = int(self._roi_y1 * frame_h)
-        roi_x2 = int(self._roi_x2 * frame_w)
-        roi_y2 = int(self._roi_y2 * frame_h)
 
         if prop_blob is not None:
             pass  # prop detection kept for sim population / obstacle markers; no visual overlay
@@ -574,18 +519,6 @@ class OverheadVisionNode(Node):
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 (255, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-
-        if early_notice:
-            cv2.putText(
-                annotated,
-                'EARLY NOTICE',
-                (20, 36),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (0, 0, 255),
                 2,
                 cv2.LINE_AA,
             )
