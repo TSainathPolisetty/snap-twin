@@ -75,7 +75,7 @@ apps:
       DISPLAY: ""
 
   foxglove-bridge:
-    command: usr/bin/foxglove-wrapper
+    command: bin/foxglove-wrapper
     extensions: [ros2-humble-ros-base]
     plugs:
       - network
@@ -84,7 +84,7 @@ apps:
     restart-condition: on-failure
 
   asset-server:
-    command: usr/bin/asset_server.sh
+    command: bin/asset_server.sh
     plugs:
       - network-bind
     daemon: simple
@@ -141,11 +141,11 @@ parts:
 
   graphics-core22:
     after:
-      - so101_ros2
+      - so101-ros2
     source: https://github.com/canonical/gpu-snap.git
     plugin: dump
     override-prime: | 
-      craftctl-default
+      craftctl default
       ${CRAFT_PART_SRC}/bin/graphics-core22-cleanup mesa-core22 nvidia-core22
     prime:
       - bin/graphics-core22-wrapper

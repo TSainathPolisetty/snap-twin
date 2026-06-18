@@ -9,7 +9,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         return super().end_headers()
 
 if __name__ == '__main__':
-    port = 8080
+    port = int(sys.argv[sys.argv.index('--port') + 1]) if '--port' in sys.argv else 8080
     print(f"Serving with CORS on port {port}...")
     httpd = HTTPServer(('0.0.0.0', port), CORSRequestHandler)
     httpd.serve_forever()

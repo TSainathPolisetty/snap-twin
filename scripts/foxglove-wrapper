@@ -3,7 +3,7 @@
 main() {
 	set -eu
 
-	exec bin/foxglove_bridge \
+	exec "$SNAP/bin/foxglove_bridge" \
 	  --ros-args \
 	  -p port:=8765 \
 	  -p address:=0.0.0.0 \
