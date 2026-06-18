@@ -58,12 +58,15 @@ class OverheadVisionNode(Node):
         # These are starting estimates for a lavender Gengar plush toy under show lighting;
         # tune gengar_hue_low/high on-site if detection is poor or noisy.
         # OpenCV HSV: hue 0-180 (purple ≈ 120-150), sat/val 0-255.
-        self.declare_parameter('gengar_hue_low',  110)
+        # All gengar_* params support live tuning via `ros2 param set`.
+        self.declare_parameter('gengar_hue_low',  125)
         self.declare_parameter('gengar_hue_high', 155)
-        self.declare_parameter('gengar_sat_low',   40)
+        self.declare_parameter('gengar_sat_low',   50)
         self.declare_parameter('gengar_sat_high', 255)
         self.declare_parameter('gengar_val_low',   40)
         self.declare_parameter('gengar_val_high', 255)
+        # Separate minimum blob area for Gengar (higher than arm/prop to suppress noise)
+        self.declare_parameter('gengar_min_area', 1500)
 
         self._camera_device = str(self.get_parameter('camera_device').value)
         self._arm_lower = np.array([
@@ -92,7 +95,7 @@ class OverheadVisionNode(Node):
         self._roi_y2 = float(self.get_parameter('roi_y2').value)
         self._min_blob_area = float(self.get_parameter('min_blob_area').value)
         self._table_height_m = float(self.get_parameter('table_height_m').value)
-        # Gengar HSV bounds
+        # Gengar HSV bounds (live-tunable via ros2 param set)
         self._gengar_lower = np.array([
             int(self.get_parameter('gengar_hue_low').value),
             int(self.get_parameter('gengar_sat_low').value),
@@ -103,6 +106,7 @@ class OverheadVisionNode(Node):
             int(self.get_parameter('gengar_sat_high').value),
             int(self.get_parameter('gengar_val_high').value),
         ], dtype=np.uint8)
+        self._gengar_min_area = float(self.get_parameter('gengar_min_area').value)
 
         self._current_joint_positions = {}
         self._gesture_active = False
@@ -130,6 +134,9 @@ class OverheadVisionNode(Node):
         self.create_subscription(Bool, '/gesture_active', self._gesture_active_cb, 10)
         self.create_subscription(JointState, '/gesture/joint_states', self._gesture_joint_states_cb, 10)
 
+        # Parameter callback — allows live tuning of Gengar HSV bounds via ros2 param set
+        self.add_on_set_parameters_callback(self._on_gengar_params_changed)
+
         self._load_extrinsics()
         self._open_camera(self._camera_device)
         self._load_intrinsics()
@@ -137,8 +144,8 @@ class OverheadVisionNode(Node):
 
         self.create_timer(1.0 / 15.0, self._timer_cb)
         self.get_logger().info(
-            'OverheadVisionNode ready — arm HSV orange, prop HSV green, Gengar HSV purple (hue 110-155); '
-            'tune gengar_hue_low/high on-site under show lighting'
+            'OverheadVisionNode ready — arm HSV orange, prop HSV green, Gengar HSV purple; '
+            'live-tune with: ros2 param set /overhead_vision_node gengar_hue_low <val>'
         )
 
     def _load_extrinsics(self):
@@ -256,6 +263,51 @@ class OverheadVisionNode(Node):
         for name, position in zip(msg.name, msg.position):
             self._current_joint_positions[name] = position
 
+    def _on_gengar_params_changed(self, params):
+        """Live parameter callback — updates Gengar HSV bounds without restarting the node."""
+        from rcl_interfaces.msg import SetParametersResult
+        gengar_names = {
+            'gengar_hue_low', 'gengar_hue_high',
+            'gengar_sat_low', 'gengar_sat_high',
+            'gengar_val_low', 'gengar_val_high',
+            'gengar_min_area',
+        }
+        changed = [p for p in params if p.name in gengar_names]
+        if changed:
+            # Re-read all gengar params atomically
+            self._gengar_lower = np.array([
+                int(self.get_parameter('gengar_hue_low').value),
+                int(self.get_parameter('gengar_sat_low').value),
+                int(self.get_parameter('gengar_val_low').value),
+            ], dtype=np.uint8)
+            self._gengar_upper = np.array([
+                int(self.get_parameter('gengar_hue_high').value),
+                int(self.get_parameter('gengar_sat_high').value),
+                int(self.get_parameter('gengar_val_high').value),
+            ], dtype=np.uint8)
+            self._gengar_min_area = float(self.get_parameter('gengar_min_area').value)
+            # Apply the new value from the incoming params (not yet committed to server)
+            for p in changed:
+                if p.name == 'gengar_hue_low':
+                    self._gengar_lower[0] = int(p.value)
+                elif p.name == 'gengar_sat_low':
+                    self._gengar_lower[1] = int(p.value)
+                elif p.name == 'gengar_val_low':
+                    self._gengar_lower[2] = int(p.value)
+                elif p.name == 'gengar_hue_high':
+                    self._gengar_upper[0] = int(p.value)
+                elif p.name == 'gengar_sat_high':
+                    self._gengar_upper[1] = int(p.value)
+                elif p.name == 'gengar_val_high':
+                    self._gengar_upper[2] = int(p.value)
+                elif p.name == 'gengar_min_area':
+                    self._gengar_min_area = float(p.value)
+            self.get_logger().info(
+                f'Gengar HSV updated: lower={self._gengar_lower.tolist()} '
+                f'upper={self._gengar_upper.tolist()} min_area={self._gengar_min_area}'
+            )
+        return SetParametersResult(successful=True)
+
     def _timer_cb(self):
         if self._cap is None or not self._cap.isOpened():
             self.get_logger().warn('Overhead camera unavailable - skipping frame', throttle_duration_sec=5.0)
@@ -269,7 +321,8 @@ class OverheadVisionNode(Node):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         arm_blob = self._extract_blob(hsv, self._arm_lower, self._arm_upper)
         prop_blob = self._extract_blob(hsv, self._prop_lower, self._prop_upper)
-        gengar_blob = self._extract_blob(hsv, self._gengar_lower, self._gengar_upper)
+        gengar_blob = self._extract_blob(hsv, self._gengar_lower, self._gengar_upper,
+                                          min_area=self._gengar_min_area)
 
         early_notice = self._blob_in_roi(prop_blob, frame.shape[1], frame.shape[0])
         self._publish_bool(self._early_notice_pub, early_notice)
@@ -285,7 +338,8 @@ class OverheadVisionNode(Node):
         annotated = self._annotate_frame(frame, arm_blob, prop_blob, gengar_blob, early_notice, consistency_text)
         self._publish_image(annotated)
 
-    def _extract_blob(self, hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray):
+    def _extract_blob(self, hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray,
+                      min_area: float = None):
         mask = self._threshold_hsv(hsv, lower, upper)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
@@ -295,7 +349,8 @@ class OverheadVisionNode(Node):
             return None
         largest = max(contours, key=cv2.contourArea)
         area = float(cv2.contourArea(largest))
-        if area < self._min_blob_area:
+        threshold = min_area if min_area is not None else self._min_blob_area
+        if area < threshold:
             return None
         moments = cv2.moments(largest)
         if abs(moments['m00']) < 1e-6:
