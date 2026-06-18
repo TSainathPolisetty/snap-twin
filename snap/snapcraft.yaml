@@ -32,11 +32,26 @@ plugs:
       - /usr/lib/python3/dist-packages/tensorrt
       - /usr/src/tensorrt/bin
 
+layout:
+  /usr/share/libdrm:
+    bind: $SNAP/graphics/libdrm
+
+  /usr/share/drirc.d:
+    symlink: $SNAP/graphics/drirc.d
+
+  /usr/share/X11/XErrorDB:
+    symlink: $SNAP/graphics/X11/XErrorDB
+
+  /usr/share/X11/locale:
+    symlink: $SNAP/graphics/X11/locale
+
 apps:
   demo:
     command: bin/start_demo.sh
     # XXX: This extension is experimental!
     extensions: [ros2-humble-ros-base]
+    command-chain:
+      - bin/graphics-core22-wrapper
     plugs:
       - camera
       - serial-port-leader
@@ -60,7 +75,7 @@ apps:
       DISPLAY: ""
 
   foxglove-bridge:
-    command: bin/foxglove-wrapper
+    command: usr/bin/foxglove-wrapper
     extensions: [ros2-humble-ros-base]
     plugs:
       - network
@@ -69,7 +84,7 @@ apps:
     restart-condition: on-failure
 
   asset-server:
-    command: bin/asset_server.sh
+    command: usr/bin/asset_server.sh
     plugs:
       - network-bind
     daemon: simple
@@ -78,59 +93,39 @@ apps:
 parts:
   so101-ros2:
     plugin: colcon
-    # XXX: this is evil
-    source: so101_ros2
-    colcon-packages:
-      - so101_ros2
+    # XXX: this is evil - not anymore -I hope
+    source: .
+    source-subdir: ros/so101_ros2
     colcon-cmake-args:
       - -DCMAKE_BUILD_TYPE=Release
     build-packages:
-      - python3-colcon-common-extensions
+      - python3-pip
+      - python3-dev
+    override-build: |
+      pip3 install yourdfpy scipy PyYAML pycuda
+      craftctl default
     after:
-      - pip-deps
-      # - onnx-model
+      - onnx-model
 
-  # pip-deps:
-  #   plugin: python
-  #   # XXX: this is also evil
-  #   source: ..
-  #   python-packages:
-  #     - yourdfpy
-  #     - scipy
-  #     - PyYAML
-  #   build-packages:
-  #     - python3-dev
-  #     - libssl-dev
+  onnx-model:
+    plugin: nil
+    source: .
+    build-packages:
+      - python3-pip
+    override-build: |
+      bash scripts/download_model.sh
+      mkdir -p $SNAPCRAFT_PART_INSTALL/models
+      mv ~/models/depth_anything_v2_small.onnx \
+        $SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.onnx
 
-  # FIXME: Use the scripts!
-  # onnx-model:
-  #   plugin: nil
-  #   build-packages:
-  #     - python3-pip
-  #   override-build: |
-  #     pip3 install huggingface_hub --quiet
-  #     python3 - << 'EOF'
-  #     from huggingface_hub import hf_hub_download
-  #     import shutil, os
-  #     path = hf_hub_download(
-  #         repo_id="depth-anything/Depth-Anything-V2-Small",
-  #         filename="depth_anything_v2_vits.onnx",
-  #         cache_dir="/tmp/da_cache"
-  #     )
-  #     dest = os.path.join(os.environ["SNAPCRAFT_PART_INSTALL"],
-  #                         "models", "depth_anything_v2_small.onnx")
-  #     os.makedirs(os.path.dirname(dest), exist_ok=True)
-  #     shutil.copy(path, dest)
-  #     print(f"Bundled ONNX: {os.path.getsize(dest) // 1024 // 1024}MB")
-  #     EOF
-  #   organize:
-  #     # XXX: huh?
-  #     models/: models/
+  share-assets:
+    plugin: dump
+    source: share/
 
   foxglove-bridge-bin:
     plugin: nil
     stage-snaps:
-      - foxglove-bridge
+      - foxglove-bridge/humble/stable
     stage:
       - opt/ros/snap/lib/foxglove_bridge/foxglove_bridge
       - opt/ros/snap/lib/*.so*
@@ -138,14 +133,19 @@ parts:
     organize:
       opt/ros/snap/lib/foxglove_bridge/foxglove_bridge: bin/foxglove_bridge
 
-  share:
-    plugin: dump
-    source: share/
-    organize:
-      "*": usr/share/snap-twin/
-
   scripts:
     plugin: dump
     source: scripts/
     organize:
-      "*": usr/bin/
+      "*": bin/
+
+  graphics-core22:
+    after:
+      - so101_ros2
+    source: https://github.com/canonical/gpu-snap.git
+    plugin: dump
+    override-prime: | 
+      craftctl-default
+      ${CRAFT_PART_SRC}/bin/graphics-core22-cleanup mesa-core22 nvidia-core22
+    prime:
+      - bin/graphics-core22-wrapper
