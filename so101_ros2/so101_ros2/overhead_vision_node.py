@@ -66,7 +66,7 @@ class OverheadVisionNode(Node):
         self.declare_parameter('gengar_val_low',   40)
         self.declare_parameter('gengar_val_high', 255)
         # Separate minimum blob area for Gengar (higher than arm/prop to suppress noise)
-        self.declare_parameter('gengar_min_area', 1500)
+        self.declare_parameter('gengar_min_area', 3000)
 
         self._camera_device = str(self.get_parameter('camera_device').value)
         self._arm_lower = np.array([
@@ -352,12 +352,18 @@ class OverheadVisionNode(Node):
         threshold = min_area if min_area is not None else self._min_blob_area
         if area < threshold:
             return None
+        x, y, w, h = cv2.boundingRect(largest)
+        # Reject blobs with extreme aspect ratios — Gengar is roughly circular,
+        # not a thin strip (catches frame-edge noise and elongated shadows)
+        if w > 0 and h > 0:
+            ratio = max(w / h, h / w)
+            if ratio > 4.0:
+                return None
         moments = cv2.moments(largest)
         if abs(moments['m00']) < 1e-6:
             return None
         cx = int(moments['m10'] / moments['m00'])
         cy = int(moments['m01'] / moments['m00'])
-        x, y, w, h = cv2.boundingRect(largest)
         return {
             'contour': largest,
             'area': area,
@@ -554,25 +560,10 @@ class OverheadVisionNode(Node):
         roi_x2 = int(self._roi_x2 * frame_w)
         roi_y2 = int(self._roi_y2 * frame_h)
 
-        if arm_blob is not None:
-            cv2.drawContours(annotated, [arm_blob['contour']], -1, (0, 255, 0), 2)
-            cv2.circle(annotated, arm_blob['centroid'], 5, (0, 255, 0), -1)
-
         if prop_blob is not None:
-            x, y, w, h = prop_blob['bbox']
-            cv2.rectangle(annotated, (x, y), (x + w, y + h), (255, 0, 0), 2)
-            cv2.putText(
-                annotated,
-                'PROP',
-                (x, max(20, y - 8)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 0, 0),
-                2,
-                cv2.LINE_AA,
-            )
+            pass  # prop detection kept for sim population / obstacle markers; no visual overlay
 
-        # Gengar plushie — magenta bounding box (distinct from green arm, blue prop, yellow ROI)
+        # Gengar plushie — magenta bounding box
         if gengar_blob is not None:
             gx, gy, gw, gh = gengar_blob['bbox']
             cv2.rectangle(annotated, (gx, gy), (gx + gw, gy + gh), (255, 0, 255), 2)
@@ -586,8 +577,6 @@ class OverheadVisionNode(Node):
                 2,
                 cv2.LINE_AA,
             )
-
-        cv2.rectangle(annotated, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 255, 255), 2)
 
         if early_notice:
             cv2.putText(

@@ -1,17 +1,15 @@
 """
-Full demo launch - teleop + gesture + overhead vision + wrist depth + collision + display
------------------------------------------------------------------------------------------
-Starts all eight nodes:
+Full demo launch - teleop + gesture + overhead vision + wrist depth + display
+------------------------------------------------------------------------------
+Starts all seven nodes:
   leader           so101_ros2_pub   /dev/ttyACM1
-  follower         so101_ros2_sub   /dev/ttyACM0
+  follower         so101_ros2_sub   /dev/ttyACM0 — state machine driven by /overhead/obstacle_present
   gesture_node     idle animation + /gesture_active mux
-  overhead_vision  HSV overhead segmentation on /dev/video0
+  overhead_vision  HSV overhead segmentation on /dev/video0 — publishes /overhead/obstacle_present
   depth_anything   TRT depth inference on wrist camera (/dev/video2 by default)
-  collision        wrist-jaw depth checker -> /collision_warning
-                   (started 3 s after launch)
   frame_display    OpenCV split view for overhead + wrist depth
                    (started 5 s after launch)
-  robot_state_pub  publishes /tf for Foxglove via foxglove-bridge snap (no custom SDK)
+  robot_state_pub  publishes /tf + /tf_static for Foxglove via foxglove-bridge snap
 
 Usage:
     ros2 launch so101_ros2 full_demo_launch.py
@@ -93,8 +91,8 @@ def generate_launch_description():
         parameters=[{
             'idle_timeout': LaunchConfiguration('idle_timeout'),
             'home_duration': 2.5,
-            'speed_scale':   0.55,   # ~1.8x slower than default — smoother gestures
-            'return_secs':   0.5,    # fast return-to-home when teleop resumes (was 2.0s)
+            'speed_scale':   0.55,
+            'return_secs':   0.5,
         }],
     )
 
@@ -120,26 +118,14 @@ def generate_launch_description():
         }],
     )
 
-    collision_node = Node(
-        package='so101_ros2',
-        executable='collision_checker',
-        name='collision_checker',
-        output='screen',
-    )
-
-    collision_delayed = TimerAction(
-        period=3.0,
-        actions=[collision_node],
-    )
-
     display_node = Node(
         package='so101_ros2',
         executable='frame_display',
         name='frame_display_node',
         output='screen',
         parameters=[{
-            'window_width': 1280,
-            'window_height': 480,
+            'window_width':  1280,
+            'window_height': 540,
         }],
     )
 
@@ -149,16 +135,7 @@ def generate_launch_description():
     )
 
     # robot_state_publisher: computes /tf from /follower/joint_states + URDF FK.
-    # foxglove-bridge snap forwards all topics (including /tf) to Foxglove Studio
-    # automatically — no custom WebSocket SDK needed.
-    # /obstacle_markers from overhead_vision_node is also forwarded by the bridge
-    # with zero extra code.
-    #
-    # NOTE: use_tf_static is NOT supported in Humble RSP. Fixed-joint transforms
-    # are published to /tf_static with TRANSIENT_LOCAL QoS, which the Jazzy
-    # foxglove-bridge snap cannot receive due to cross-distro FastDDS compatibility.
-    # The tf_static_relay node below works around this by republishing /tf_static
-    # content onto volatile /tf, which foxglove-bridge subscribes to just fine.
+    # foxglove-bridge snap (humble/stable channel) forwards all topics to Studio.
     robot_state_pub = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -166,18 +143,6 @@ def generate_launch_description():
         output='screen',
         parameters=[{'robot_description': _robot_description}],
         remappings=[('joint_states', '/follower/joint_states')],
-    )
-
-    # tf_static_relay: subscribes to /tf_static (TRANSIENT_LOCAL, works within Humble DDS)
-    # and republishes all accumulated static transforms on volatile /tf at 2 Hz.
-    # This gives the Jazzy foxglove-bridge snap visibility of fixed-joint frames
-    # (world→table, table→base_link, gripper_link→gripper_frame_link, etc.) without
-    # requiring any QoS reconfiguration on either the RSP or the bridge side.
-    tf_relay_node = Node(
-        package='so101_ros2',
-        executable='tf_static_relay',
-        name='tf_static_relay',
-        output='screen',
     )
 
     return LaunchDescription([
@@ -190,8 +155,6 @@ def generate_launch_description():
         gesture_node,
         overhead_node,
         depth_node,
-        collision_delayed,
         display_delayed,
         robot_state_pub,
-        tf_relay_node,
     ])

@@ -1,8 +1,7 @@
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 import time
 import math
 from so101_ros2.lerobot.so101 import SO101
@@ -48,25 +47,18 @@ class LeRobotJointStateSubscriber(Node):
         self._handoff_countdown = 0
         self._handoff_slow_step = self.interpolation_step / 3.0
 
-        # State machine — starts NORMAL, transitions via collision/convergence/clear-gate
+        # State machine — starts NORMAL, transitions via convergence/clear-gate
         self._state = _STATE_NORMAL
-        self._converge_ticks = 0   # consecutive ticks within 3° of RETREAT_DEG (for RETREATING→HOLDING)
-        self._clear_streak  = 0    # consecutive obstacle-free readings in HOLDING
-        self._clear_since   = None # time.monotonic() of first consecutive-clear reading
+        self._converge_ticks  = 0   # consecutive ticks within 3° of RETREAT_DEG
+        self._clear_streak    = 0   # consecutive obstacle-free readings in HOLDING
+        self._clear_since     = None # time.monotonic() of first consecutive-clear reading
+        self._retreat_started = None # time.monotonic() when RETREATING was entered
 
         # /overhead/obstacle_present — consulted ONLY while in HOLDING
         self._obstacle_present = False
 
-        # Collision gate — VOLATILE QoS so stale messages from previous sessions
-        # are not received on startup (prevents spurious retreat at launch)
-        _volatile_qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.RELIABLE,
-            durability=QoSDurabilityPolicy.VOLATILE,
-            depth=10)
-        self.collision_detected = False
-        self.create_subscription(Bool, '/collision_warning', self._collision_cb, _volatile_qos)
-
-        # Overhead general obstacle presence (Phase 5 — ignored until state is HOLDING)
+        # /overhead/obstacle_present — sole source of retreat triggers and clear gate
+        self._obstacle_present = False
         self.create_subscription(Bool, '/overhead/obstacle_present', self._obstacle_present_cb, 10)
 
         # Gesture mux — gesture node publishes here when idle animation runs
@@ -76,6 +68,10 @@ class LeRobotJointStateSubscriber(Node):
 
         # 50 Hz interpolation timer
         self.timer = self.create_timer(0.02, self.interpolation_callback)
+
+        # Publisher for arm state string ("NORMAL" / "RETREATING" / "HOLDING") —
+        # consumed by frame_display_node for banner selection
+        self._arm_state_pub = self.create_publisher(String, '/arm_state', 10)
 
         # Publisher for the follower's actual interpolated position (radians) —
         # consumed by robot_state_publisher / digital twin for FK visualization
@@ -93,35 +89,19 @@ class LeRobotJointStateSubscriber(Node):
         self.get_logger().info('LeRobotController node has been started.')
         self.robot = self.init_lerobot_arm()
 
-    def _collision_cb(self, msg: Bool):
-        prev = self.collision_detected
-        self.collision_detected = msg.data
-        if msg.data:
-            if self._state == _STATE_NORMAL:
-                # NORMAL → RETREATING: fresh retreat — reset both convergence and clear timer
-                self._state = _STATE_RETREATING
-                self._converge_ticks = 0
-                self._clear_since = None  # fresh hold session
-                self.goal_positions = self.RETREAT_DEG.copy()
-                self.get_logger().warn('Follower RETREATING — Gengar detected!')
-            elif self._state == _STATE_HOLDING:
-                # HOLDING → RETREATING: preserve _clear_since so the 3-second timer
-                # accumulates across re-entries (wrist cam may re-trigger during hold)
-                self._state = _STATE_RETREATING
-                self._converge_ticks = 0
-                self.goal_positions = self.RETREAT_DEG.copy()
-                self.get_logger().warn('Follower RETREATING — collision re-detected from HOLDING')
-            # If already RETREATING: do NOT reset converge_ticks — the arm is already moving
-            # toward the retreat pose. Resetting would prevent convergence if the camera
-            # keeps seeing something (e.g., arm structure) during the retreat motion.
-            # goal_positions is already RETREAT_DEG so no update needed.
-        else:
-            if prev:
-                self.get_logger().warn(
-                    f'Collision cleared — still {self._state}, waiting for convergence/gate')
-
     def _obstacle_present_cb(self, msg: Bool):
         self._obstacle_present = msg.data
+        if msg.data:
+            if self._state == _STATE_NORMAL:
+                self._state = _STATE_RETREATING
+                self._converge_ticks = 0
+                self._clear_since = None
+                self._retreat_started = time.monotonic()
+                self.goal_positions = self.RETREAT_DEG.copy()
+                self.get_logger().warn('Follower RETREATING - Gengar detected!')
+            # HOLDING: stay holding — do NOT re-enter RETREATING while already safe.
+            # The arm is already at the retreat pose; flickering back to RETREATING
+            # when the overhead camera keeps seeing Gengar serves no purpose.
 
     def _gesture_active_cb(self, msg: Bool):
         if self._prev_gesture_active and not msg.data:
@@ -176,21 +156,17 @@ class LeRobotJointStateSubscriber(Node):
 
         # --- State machine transitions ---
         if self._state == _STATE_RETREATING:
-            # Check whether the arm has converged to the retreat pose
             max_diff = max(
                 abs(self.current_positions.get(j, 0.0) - self.RETREAT_DEG.get(j, 0.0))
                 for j in self.RETREAT_DEG
             )
             if max_diff <= 3.0:
                 self._converge_ticks += 1
-                if self._converge_ticks >= 5:
+                elapsed = time.monotonic() - (self._retreat_started or 0.0)
+                if self._converge_ticks >= 5 and elapsed >= 5.0:
                     self._state = _STATE_HOLDING
                     self._clear_streak = 0
-                    # _clear_since is NOT reset here — it was reset when we first entered
-                    # RETREATING from NORMAL, so the 3-second hold timer accumulates
-                    # correctly across multiple collision re-triggers during HOLDING.
-                    self.get_logger().warn(
-                        'Follower HOLDING — retreat pose reached, watching for obstacle clear')
+                    self.get_logger().warn('Follower HOLDING - feeling safe')
             else:
                 self._converge_ticks = 0
 
@@ -209,8 +185,7 @@ class LeRobotJointStateSubscriber(Node):
                     self._state = _STATE_NORMAL
                     # Fire the SAME slow-step handoff used for gesture→teleop transitions
                     self._handoff_countdown = 50
-                    self.get_logger().warn(
-                        'Follower NORMAL — Gengar removed (5 readings + 3 s), resuming with easing')
+                    self.get_logger().warn('Follower RESUMED - Gengar removed, I am free!')
 
         # --- Effective step (handoff easing applies universally) ---
         if self._handoff_countdown > 0:
@@ -247,6 +222,11 @@ class LeRobotJointStateSubscriber(Node):
             for n in _JOINT_NAMES
         ]
         self._follower_js_pub.publish(js)
+
+        # Publish arm state for display banner
+        arm_state_msg = String()
+        arm_state_msg.data = self._state
+        self._arm_state_pub.publish(arm_state_msg)
 
 
 def main(args=None):

@@ -5,14 +5,11 @@
 # -----------------------------------------------------------------------------
 # Starts:
 #   - Asset server (STL meshes for Foxglove 3D view)
-#   - so101_digital_twin.py (Foxglove SDK WebSocket server on port 8765)
-#     NOTE: The Jazzy foxglove-bridge snap cannot receive data from Humble
-#     publishers (DDS type-hash incompatibility). The SDK server is the only
-#     working solution for this Humble + Jazzy snap combination.
+#   - foxglove-bridge snap (humble/stable channel, port 8765)
 #   - Leader arm (teleop publisher)
 #   - Follower arm (subscriber, respects gesture_active flag)
 #   - Gesture node (idle animation after X seconds of no input)
-#   - robot_state_publisher (computes /tf for internal ROS transform lookups)
+#   - robot_state_publisher (computes /tf for Foxglove)
 #
 # Usage:
 #   bash start_gesture_demo.sh
@@ -46,10 +43,12 @@ done
 
 # --- 1. Kill any leftover processes from previous run ---
 echo "[1/4] Clearing previous session..."
-pkill -9 -f so101_ros2     > /dev/null 2>&1 || true
-pkill -9 -f digital_twin   > /dev/null 2>&1 || true
-pkill -9 -f simple_cors    > /dev/null 2>&1 || true
-pkill -9 -f gesture_node   > /dev/null 2>&1 || true
+pkill -9 -f so101_ros2          > /dev/null 2>&1 || true
+pkill -9 -f robot_state_pub     > /dev/null 2>&1 || true
+pkill -9 -f foxglove_bridge     > /dev/null 2>&1 || true
+pkill -9 -f tf_static_relay     > /dev/null 2>&1 || true
+pkill -9 -f simple_cors         > /dev/null 2>&1 || true
+pkill -9 -f gesture_node        > /dev/null 2>&1 || true
 sleep 1
 
 # --- 2. Environment ---
@@ -83,14 +82,14 @@ if [ "$ROS_DISTRO" != "humble" ]; then
 fi
 
 # --- 3. Background services ---
-echo "[3/4] Starting Foxglove services (SDK WebSocket bridge)..."
+echo "[3/4] Starting Foxglove services (foxglove-bridge, native Humble)..."
 
 cd "$SNAP_DIR"
 
-# Stop foxglove-bridge snap so the Foxglove SDK server can claim port 8765.
-# The Jazzy foxglove-bridge snap cannot receive data from Humble publishers
-# (Humble/Jazzy DDS type-hash incompatibility — subscriptions fail silently).
-# The so101_digital_twin.py SDK server works correctly within Humble's DDS.
+# Stop the foxglove-bridge snap service — we run the bridge binary directly in our
+# own ROS2 environment (same user, same FastDDS config as all other nodes).
+# This avoids snap isolation that prevents TRANSIENT_LOCAL /tf_static from being
+# received by the bridge, which caused the 3D panel "No coordinate frames found" issue.
 sudo snap stop foxglove-bridge 2>/dev/null || true
 
 # Patch URDF mesh URLs with current device IP
@@ -104,11 +103,23 @@ python3 "$SNAP_DIR/scripts/simple_cors_server.py" > /tmp/asset_server.log 2>&1 &
 ASSET_PID=$!
 echo "  Asset server PID: $ASSET_PID (port 8080)"
 
-# SDK WebSocket server — serves FrameTransforms + SceneUpdate to Foxglove Studio.
-# Runs natively in the Humble Python environment so DDS subscriptions work correctly.
-python3 "$ROS_SCRIPTS/so101_digital_twin.py" > /tmp/digital_twin.log 2>&1 &
-TWIN_PID=$!
-echo "  Digital twin PID: $TWIN_PID (port 8765)"
+# foxglove-bridge — run the snap's binary directly in our ROS2 environment so it
+# shares the same DDS participant as robot_state_publisher and can receive TRANSIENT_LOCAL /tf_static.
+# Run in a subshell so the extra lib paths don't pollute the ros2 launch environment.
+(
+  FG_SNAP=/snap/foxglove-bridge/current
+  export LD_LIBRARY_PATH=$FG_SNAP/opt/ros/snap/lib:$FG_SNAP/opt/ros/humble/lib:$LD_LIBRARY_PATH
+  export AMENT_PREFIX_PATH=$FG_SNAP/opt/ros/snap:$AMENT_PREFIX_PATH
+  ros2 run foxglove_bridge foxglove_bridge \
+      --ros-args \
+      -p port:=8765 \
+      -p address:=0.0.0.0 \
+      -p capabilities:="[clientPublish,parameters,parametersSubscribe,services,connectionGraph,assets]" \
+      -p topic_whitelist:="['.*']" \
+      -p asset_uri_allowlist:="['^package://(?:\\w+/)*\\w+\\.(?:dae|fbx|glb|gltf|jpeg|jpg|mtl|obj|png|stl|urdf|xacro)$']"
+) > /tmp/foxglove_bridge.log 2>&1 &
+BRIDGE_PID=$!
+echo "  foxglove-bridge PID: $BRIDGE_PID (port 8765)"
 
 sleep 1
 
@@ -131,11 +142,12 @@ echo ""
 cleanup() {
     echo ""
     echo "Shutting down gesture demo..."
-    kill "$ASSET_PID"   2>/dev/null || true
-    kill "$TWIN_PID"    2>/dev/null || true
-    pkill -f so101_ros2     2>/dev/null || true
-    pkill -f gesture_node   2>/dev/null || true
-    pkill -f digital_twin   2>/dev/null || true
+    kill "$ASSET_PID"     2>/dev/null || true
+    kill "$BRIDGE_PID"    2>/dev/null || true
+    pkill -f so101_ros2         2>/dev/null || true
+    pkill -f robot_state_pub    2>/dev/null || true
+    pkill -f foxglove_bridge    2>/dev/null || true
+    pkill -f gesture_node       2>/dev/null || true
     echo "Done."
     exit 0
 }
@@ -144,7 +156,7 @@ trap cleanup SIGINT SIGTERM
 # Grant serial port access for this session
 sudo chmod a+rw /dev/ttyACM0 /dev/ttyACM1 2>/dev/null || true
 
-# Foreground: ROS2 launch (leader + follower + gesture + depth + collision + display + robot_state_publisher)
+# Foreground: ROS2 launch (leader + follower + gesture + depth + display + robot_state_publisher)
 # NOTE: For obstacle sim population in Foxglove (/obstacle_markers channel), set table_height_m to the
 # measured distance (meters) from the Brio camera optical centre to the table surface.
 # Example: ros2 launch ... table_height_m:=0.74
