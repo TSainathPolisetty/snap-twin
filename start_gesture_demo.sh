@@ -5,11 +5,14 @@
 # -----------------------------------------------------------------------------
 # Starts:
 #   - Asset server (STL meshes for Foxglove 3D view)
-#   - foxglove-bridge snap (WebSocket on port 8765, forwards all ROS topics)
+#   - so101_digital_twin.py (Foxglove SDK WebSocket server on port 8765)
+#     NOTE: The Jazzy foxglove-bridge snap cannot receive data from Humble
+#     publishers (DDS type-hash incompatibility). The SDK server is the only
+#     working solution for this Humble + Jazzy snap combination.
 #   - Leader arm (teleop publisher)
 #   - Follower arm (subscriber, respects gesture_active flag)
 #   - Gesture node (idle animation after X seconds of no input)
-#   - robot_state_publisher (computes /tf from /follower/joint_states for Foxglove)
+#   - robot_state_publisher (computes /tf for internal ROS transform lookups)
 #
 # Usage:
 #   bash start_gesture_demo.sh
@@ -80,14 +83,15 @@ if [ "$ROS_DISTRO" != "humble" ]; then
 fi
 
 # --- 3. Background services ---
-echo "[3/4] Starting Foxglove services..."
+echo "[3/4] Starting Foxglove services (SDK WebSocket bridge)..."
 
 cd "$SNAP_DIR"
 
-# Restart foxglove-bridge snap so it claims port 8765 fresh.
-# The bridge forwards all ROS topics (including /tf from robot_state_publisher
-# and /obstacle_markers from overhead_vision) to Foxglove Studio automatically.
-sudo snap restart foxglove-bridge 2>/dev/null || true
+# Stop foxglove-bridge snap so the Foxglove SDK server can claim port 8765.
+# The Jazzy foxglove-bridge snap cannot receive data from Humble publishers
+# (Humble/Jazzy DDS type-hash incompatibility — subscriptions fail silently).
+# The so101_digital_twin.py SDK server works correctly within Humble's DDS.
+sudo snap stop foxglove-bridge 2>/dev/null || true
 
 # Patch URDF mesh URLs with current device IP
 DEVICE_IP=$(hostname -I | awk '{print $1}')
@@ -99,6 +103,12 @@ echo "  URDF mesh URLs updated → http://$DEVICE_IP:8080/assets/"
 python3 "$SNAP_DIR/scripts/simple_cors_server.py" > /tmp/asset_server.log 2>&1 &
 ASSET_PID=$!
 echo "  Asset server PID: $ASSET_PID (port 8080)"
+
+# SDK WebSocket server — serves FrameTransforms + SceneUpdate to Foxglove Studio.
+# Runs natively in the Humble Python environment so DDS subscriptions work correctly.
+python3 "$ROS_SCRIPTS/so101_digital_twin.py" > /tmp/digital_twin.log 2>&1 &
+TWIN_PID=$!
+echo "  Digital twin PID: $TWIN_PID (port 8765)"
 
 sleep 1
 
@@ -121,9 +131,11 @@ echo ""
 cleanup() {
     echo ""
     echo "Shutting down gesture demo..."
-    kill "$ASSET_PID" 2>/dev/null || true
+    kill "$ASSET_PID"   2>/dev/null || true
+    kill "$TWIN_PID"    2>/dev/null || true
     pkill -f so101_ros2     2>/dev/null || true
     pkill -f gesture_node   2>/dev/null || true
+    pkill -f digital_twin   2>/dev/null || true
     echo "Done."
     exit 0
 }
