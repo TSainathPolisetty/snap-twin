@@ -144,8 +144,9 @@ parts:
       scripts/simple_cors_server.py: bin/simple_cors_server.py
 
   foxglove-bridge-bin:
-    plugin: dump
-    source: /snap/foxglove-bridge/current
+    plugin: nil
+    stage-snaps:
+      - foxglove-bridge-bin
     stage:
       - opt/ros/snap/lib/foxglove_bridge/foxglove_bridge
       - opt/ros/snap/lib/*.so*
