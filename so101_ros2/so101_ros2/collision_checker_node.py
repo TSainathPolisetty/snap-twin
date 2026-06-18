@@ -22,7 +22,6 @@ Parameters:
 
 import array
 
-import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -42,8 +41,6 @@ class CollisionCheckerNode(Node):
         self.declare_parameter('jaw_y2', 1.00)
         self.declare_parameter('delta_threshold', 0.30)  # live hardware: at-rest delta ~0.575-0.604, hand-in-jaw ~0.35-0.47
         self.declare_parameter('streak_required', 2)
-        self.declare_parameter('mask_margin', 0.05)  # per-pixel: flag jaw pixels anomalously closer than jaw_bg_ref
-        self.declare_parameter('jaw_bg_alpha', 0.02)  # EMA alpha for jaw background reference adaptation
 
         self._jaw_x1 = float(self.get_parameter('jaw_x1').value)
         self._jaw_y1 = float(self.get_parameter('jaw_y1').value)
@@ -51,18 +48,10 @@ class CollisionCheckerNode(Node):
         self._jaw_y2 = float(self.get_parameter('jaw_y2').value)
         self._delta_threshold = float(self.get_parameter('delta_threshold').value)
         self._streak_required = max(1, int(self.get_parameter('streak_required').value))
-        self._mask_margin = float(self.get_parameter('mask_margin').value)
-        self._jaw_bg_alpha = float(self.get_parameter('jaw_bg_alpha').value)
 
         self._latest_depth = None
         self._obstacle_streak = 0
         self._collision_now = False
-        # Jaw-internal adaptive background reference. Learns what the gripper's own
-        # resting depth profile looks like at each pixel position, so the fingers
-        # themselves never register as anomalous in the per-pixel visualization mask.
-        # Only adapts when the aggregate collision test is CLEAR (not _collision_now),
-        # so a real obstacle inside the jaw cannot be absorbed into "normal."
-        self._jaw_bg_ref = None  # float32, same shape as jaw crop
 
         volatile_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
@@ -138,14 +127,6 @@ class CollisionCheckerNode(Node):
 
         self._collision_now = self._obstacle_streak >= self._streak_required
 
-        # Update jaw background reference — adapts only when CLEAR so a real obstacle
-        # inside the jaw is never absorbed into the reference.
-        jaw_float = jaw.astype(np.float32)
-        if self._jaw_bg_ref is None or self._jaw_bg_ref.shape != jaw.shape:
-            self._jaw_bg_ref = jaw_float.copy()
-        elif not self._collision_now:
-            cv2.accumulateWeighted(jaw_float, self._jaw_bg_ref, self._jaw_bg_alpha)
-
         if self._collision_now:
             status = (
                 f'COLLISION delta={delta:.3f} '
@@ -173,29 +154,10 @@ class CollisionCheckerNode(Node):
 
     def _publish_mask(self, h: int, w: int, x1: int, y1: int, x2: int, y2: int,
                       jaw: np.ndarray, rest_p95: float, active: bool):
-        """Publish per-pixel collision mask using jaw-adaptive background reference.
-
-        Each jaw pixel is flagged 255 when it is significantly CLOSER to the camera
-        than the jaw's own slowly-adapting background reference (self._jaw_bg_ref).
-        This means the gripper's own resting finger depth is exactly what the reference
-        adapts to, so the fingers never register as anomalous — only something NEW and
-        closer entering the jaw region does.
-
-        The old rest_p95-based threshold is no longer used for the mask (rest_p95 is
-        still passed for call-site compatibility but is ignored here). The aggregate
-        streak-based /collision_warning logic is unchanged — this mask is purely for
-        visualization.
-        """
+        """Publish uniform-fill jaw mask — 255 when collision active, 0 otherwise."""
         mask = np.zeros((h, w), dtype=np.uint8)
-        if (active and jaw.size > 0
-                and self._jaw_bg_ref is not None
-                and self._jaw_bg_ref.shape == jaw.shape):
-            # pixel_delta > 0 means closer to camera than the reference (anomalously close)
-            pixel_delta = jaw.astype(np.float32) - self._jaw_bg_ref
-            close_pixels = (pixel_delta > self._mask_margin) & np.isfinite(pixel_delta)
-            jaw_mask_region = np.zeros_like(jaw, dtype=np.uint8)
-            jaw_mask_region[close_pixels] = 255
-            mask[y1:y2, x1:x2] = jaw_mask_region
+        if active and self._collision_now:
+            mask[y1:y2, x1:x2] = 255
 
         msg = Image()
         msg.header.stamp = self.get_clock().now().to_msg()

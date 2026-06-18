@@ -119,16 +119,6 @@ class FrameDisplayNode(Node):
                 )
             panel = overlay
 
-            # Draw bounding boxes around obstacle contours
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in contours:
-                if cv2.contourArea(cnt) < 200:
-                    continue
-                x, y, w, h = cv2.boundingRect(cnt)
-                cv2.rectangle(panel, (x, y), (x + w, y + h), (0, 60, 255), 2)
-                cv2.putText(panel, 'OBSTACLE', (x, max(y - 6, 14)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 60, 255), 1, cv2.LINE_AA)
-
         if self._collision_now:
             overlay = panel.copy()
             cv2.rectangle(overlay, (jaw_x1, jaw_y1), (jaw_x2, jaw_y2), (0, 0, 255), -1)
@@ -140,9 +130,20 @@ class FrameDisplayNode(Node):
     def _render_banner(self, width: int, height: int):
         banner = np.zeros((height, width, 3), dtype=np.uint8)
         if self._collision_now:
-            banner[:] = (0, 0, 180)
-            title = '! COLLISION WARNING !'
+            banner[:] = (80, 20, 80)  # dark purple
+            title = 'GENGAR DETECTED - ARM RETREATING'
             color = (255, 255, 255)
+            # Gengar face icon on the right side of the banner
+            fx = width - 60
+            fy = height // 2
+            # Eyes
+            cv2.circle(banner, (fx - 14, fy - 6), 5, (0, 0, 200), -1)
+            cv2.circle(banner, (fx + 14, fy - 6), 5, (0, 0, 200), -1)
+            # Grin arc
+            cv2.ellipse(banner, (fx, fy + 4), (18, 10), 0, 0, 180, (255, 255, 255), 2)
+            # Teeth — 4 short vertical lines across the grin
+            for tx in (fx - 12, fx - 4, fx + 4, fx + 12):
+                cv2.line(banner, (tx, fy + 4), (tx, fy + 10), (255, 255, 255), 2)
         else:
             banner[:] = (30, 80, 30)
             title = 'CLEAR'

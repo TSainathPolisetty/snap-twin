@@ -103,7 +103,7 @@ class LeRobotJointStateSubscriber(Node):
                 self._converge_ticks = 0
                 self._clear_since = None  # fresh hold session
                 self.goal_positions = self.RETREAT_DEG.copy()
-                self.get_logger().warn('Follower RETREATING — collision detected')
+                self.get_logger().warn('Follower RETREATING — Gengar detected!')
             elif self._state == _STATE_HOLDING:
                 # HOLDING → RETREATING: preserve _clear_since so the 3-second timer
                 # accumulates across re-entries (wrist cam may re-trigger during hold)
@@ -210,7 +210,7 @@ class LeRobotJointStateSubscriber(Node):
                     # Fire the SAME slow-step handoff used for gesture→teleop transitions
                     self._handoff_countdown = 50
                     self.get_logger().warn(
-                        'Follower NORMAL — obstacle cleared (5 readings + 3 s), resuming with easing')
+                        'Follower NORMAL — Gengar removed (5 readings + 3 s), resuming with easing')
 
         # --- Effective step (handoff easing applies universally) ---
         if self._handoff_countdown > 0:

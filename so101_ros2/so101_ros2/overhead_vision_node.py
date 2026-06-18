@@ -2,8 +2,8 @@
 Overhead HSV segmentation node.
 
 Owns the Brio 101 overhead camera on /dev/video0, segments the orange arm and a
-blue/teal prop, optionally backprojects the prop to the table plane, and
-publishes an annotated overhead view.
+green prop (for backprojection/simulation), and detects a lavender Gengar plushie
+as the workspace obstacle trigger.
 """
 
 import array
@@ -11,7 +11,6 @@ import contextlib
 import io
 import math
 import os
-import time
 
 import cv2
 import numpy as np
@@ -55,18 +54,16 @@ class OverheadVisionNode(Node):
         self.declare_parameter('roi_y2', 0.85)
         self.declare_parameter('min_blob_area', 500)
         self.declare_parameter('table_height_m', PLACEHOLDER_TABLE_HEIGHT)
-        # Background-diff general obstacle detector (Phase 5)
-        self.declare_parameter('bg_capture_secs', 5.0)
-        # bg_diff_threshold kept for reference but is NO LONGER used in the primary
-        # diff path — replaced by HSV-based hue_threshold + sat_threshold below.
-        self.declare_parameter('bg_diff_threshold', 30)
-        self.declare_parameter('bg_obstacle_min_area', 2000)
-        self.declare_parameter('bg_ema_alpha', 0.01)
-        # HSV-based diff thresholds (shadow-resistant): hue 0-180, sat 0-255 (OpenCV scale)
-        # A shadow dims brightness but barely shifts hue/saturation — so a pure brightness
-        # change is ignored, while a real differently-coloured object shifts hue meaningfully.
-        self.declare_parameter('hue_threshold', 15)
-        self.declare_parameter('sat_threshold', 40)
+        # Gengar plushie detector — lavender/purple obstacle trigger.
+        # These are starting estimates for a lavender Gengar plush toy under show lighting;
+        # tune gengar_hue_low/high on-site if detection is poor or noisy.
+        # OpenCV HSV: hue 0-180 (purple ≈ 120-150), sat/val 0-255.
+        self.declare_parameter('gengar_hue_low',  110)
+        self.declare_parameter('gengar_hue_high', 155)
+        self.declare_parameter('gengar_sat_low',   40)
+        self.declare_parameter('gengar_sat_high', 255)
+        self.declare_parameter('gengar_val_low',   40)
+        self.declare_parameter('gengar_val_high', 255)
 
         self._camera_device = str(self.get_parameter('camera_device').value)
         self._arm_lower = np.array([
@@ -95,13 +92,17 @@ class OverheadVisionNode(Node):
         self._roi_y2 = float(self.get_parameter('roi_y2').value)
         self._min_blob_area = float(self.get_parameter('min_blob_area').value)
         self._table_height_m = float(self.get_parameter('table_height_m').value)
-        # Background-diff detector parameters
-        self._bg_capture_secs = float(self.get_parameter('bg_capture_secs').value)
-        self._bg_diff_threshold = int(self.get_parameter('bg_diff_threshold').value)
-        self._bg_obstacle_min_area = float(self.get_parameter('bg_obstacle_min_area').value)
-        self._bg_ema_alpha = float(self.get_parameter('bg_ema_alpha').value)
-        self._hue_threshold = int(self.get_parameter('hue_threshold').value)
-        self._sat_threshold = int(self.get_parameter('sat_threshold').value)
+        # Gengar HSV bounds
+        self._gengar_lower = np.array([
+            int(self.get_parameter('gengar_hue_low').value),
+            int(self.get_parameter('gengar_sat_low').value),
+            int(self.get_parameter('gengar_val_low').value),
+        ], dtype=np.uint8)
+        self._gengar_upper = np.array([
+            int(self.get_parameter('gengar_hue_high').value),
+            int(self.get_parameter('gengar_sat_high').value),
+            int(self.get_parameter('gengar_val_high').value),
+        ], dtype=np.uint8)
 
         self._current_joint_positions = {}
         self._gesture_active = False
@@ -118,13 +119,6 @@ class OverheadVisionNode(Node):
         self._tvec = None
         self._rotation = None
         self._camera_origin_base = None
-        # Background-diff general obstacle detector state
-        self._bg_ref = None            # float32 BGR background reference (ROI-sized)
-        self._bg_capturing = True      # True during startup background capture
-        self._bg_capture_start = None  # time.monotonic() when first frame arrived
-        self._collision_warning = False  # gating variable for EMA adaptation
-        self._obstacle_present_now = False  # current bg-diff detection result
-        self._bg_obstacle_blob = None  # latest detected obstacle bbox for annotation
 
         self._annotated_pub = self.create_publisher(Image, '/overhead/image_annotated', 5)
         self._early_notice_pub = self.create_publisher(Bool, '/overhead/early_notice', 10)
@@ -135,7 +129,6 @@ class OverheadVisionNode(Node):
         self.create_subscription(JointState, '/joint_states', self._joint_states_cb, 10)
         self.create_subscription(Bool, '/gesture_active', self._gesture_active_cb, 10)
         self.create_subscription(JointState, '/gesture/joint_states', self._gesture_joint_states_cb, 10)
-        self.create_subscription(Bool, '/collision_warning', self._collision_warning_cb, 10)
 
         self._load_extrinsics()
         self._open_camera(self._camera_device)
@@ -144,7 +137,8 @@ class OverheadVisionNode(Node):
 
         self.create_timer(1.0 / 15.0, self._timer_cb)
         self.get_logger().info(
-            'OverheadVisionNode ready - prop HSV set for green (hue 40-80); tune prop_hue_low/high params if detection is poor'
+            'OverheadVisionNode ready — arm HSV orange, prop HSV green, Gengar HSV purple (hue 110-155); '
+            'tune gengar_hue_low/high on-site under show lighting'
         )
 
     def _load_extrinsics(self):
@@ -262,9 +256,6 @@ class OverheadVisionNode(Node):
         for name, position in zip(msg.name, msg.position):
             self._current_joint_positions[name] = position
 
-    def _collision_warning_cb(self, msg: Bool):
-        self._collision_warning = msg.data
-
     def _timer_cb(self):
         if self._cap is None or not self._cap.isOpened():
             self.get_logger().warn('Overhead camera unavailable - skipping frame', throttle_duration_sec=5.0)
@@ -278,16 +269,20 @@ class OverheadVisionNode(Node):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         arm_blob = self._extract_blob(hsv, self._arm_lower, self._arm_upper)
         prop_blob = self._extract_blob(hsv, self._prop_lower, self._prop_upper)
+        gengar_blob = self._extract_blob(hsv, self._gengar_lower, self._gengar_upper)
 
         early_notice = self._blob_in_roi(prop_blob, frame.shape[1], frame.shape[0])
         self._publish_bool(self._early_notice_pub, early_notice)
+
+        # Gengar plushie drives /overhead/obstacle_present (replaces bg-diff)
+        gengar_in_roi = self._blob_in_roi(gengar_blob, frame.shape[1], frame.shape[0])
+        self._publish_bool(self._obstacle_present_pub, gengar_in_roi)
 
         self._publish_marker(prop_blob)
         consistency_text = self._compute_consistency_status(arm_blob)
         self._publish_string(self._consistency_pub, consistency_text)
 
-        self._bg_obstacle_blob = self._update_bg_detector(frame, hsv)
-        annotated = self._annotate_frame(frame, arm_blob, prop_blob, early_notice, consistency_text)
+        annotated = self._annotate_frame(frame, arm_blob, prop_blob, gengar_blob, early_notice, consistency_text)
         self._publish_image(annotated)
 
     def _extract_blob(self, hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray):
@@ -495,116 +490,8 @@ class OverheadVisionNode(Node):
         u, v = projected.reshape(2)
         return float(u), float(v)
 
-    def _update_bg_detector(self, frame: np.ndarray, hsv: np.ndarray):
-        """Background-diff general obstacle detector.
-
-        Distinct from the green-prop HSV detector: this detects ANY object that
-        wasn't there when the node started, using a pixel-level background diff.
-        The arm is explicitly excluded using the arm HSV mask computed this same
-        tick (not via background adaptation, which could absorb the arm over time).
-
-        Background reference is established over ~5 s at startup with the
-        workspace assumed empty — this is for obstacle detection only, NOT for
-        depth calibration (see collision_checker_node for that).
-
-        EMA adaptation runs only during confirmed-calm periods (collision_warning
-        False AND obstacle_present False) so a stationary real obstacle cannot
-        slowly be absorbed into the background reference.
-        """
-        fh, fw = frame.shape[:2]
-        x1 = int(self._roi_x1 * fw)
-        y1 = int(self._roi_y1 * fh)
-        x2 = int(self._roi_x2 * fw)
-        y2 = int(self._roi_y2 * fh)
-        roi = frame[y1:y2, x1:x2].astype(np.float32)
-
-        # --- Startup background capture ---
-        if self._bg_capturing:
-            if self._bg_capture_start is None:
-                self._bg_capture_start = time.monotonic()
-                self.get_logger().info(
-                    'BG detector: capturing background reference — keep workspace empty for '
-                    f'{self._bg_capture_secs:.0f} s')
-            # Build background incrementally via EMA (no frame list — avoids large memory spike)
-            if self._bg_ref is None:
-                self._bg_ref = roi.copy()
-            else:
-                cv2.accumulateWeighted(roi, self._bg_ref, 0.3)
-            elapsed = time.monotonic() - self._bg_capture_start
-            if elapsed >= self._bg_capture_secs:
-                self._bg_capturing = False
-                self.get_logger().info('BG detector: reference captured — obstacle detection active')
-            return None
-
-        if self._bg_ref is None:
-            return None
-
-        # --- Arm exclusion mask (dilated to cover arm edges) ---
-        arm_mask_full = self._threshold_hsv(hsv, self._arm_lower, self._arm_upper)
-        kd = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-        arm_mask_full = cv2.dilate(arm_mask_full, kd, iterations=2)
-        arm_roi = arm_mask_full[y1:y2, x1:x2]
-
-        # --- Background diff (HSV-based, shadow-resistant) ---
-        # Convert both the current ROI and the background reference to HSV before
-        # diffing. A shadow mostly dims brightness (V channel) while barely shifting
-        # hue (H) or saturation (S). By flagging only pixels where hue OR saturation
-        # differs significantly — and ignoring pure brightness changes — we avoid
-        # triggering on shadows cast across the grey workspace mat.
-        roi_uint8 = np.clip(roi, 0, 255).astype(np.uint8)
-        bg_uint8  = np.clip(self._bg_ref, 0, 255).astype(np.uint8)
-        roi_hsv = cv2.cvtColor(roi_uint8, cv2.COLOR_BGR2HSV)
-        bg_hsv  = cv2.cvtColor(bg_uint8,  cv2.COLOR_BGR2HSV)
-
-        # Hue diff — circular on 0-180 scale (OpenCV HSV hue range)
-        hue_diff = roi_hsv[:, :, 0].astype(np.int16) - bg_hsv[:, :, 0].astype(np.int16)
-        hue_diff = np.abs(hue_diff)
-        hue_diff = np.minimum(hue_diff, 180 - hue_diff)  # shortest arc on 0-180 wheel
-
-        # Saturation diff — 0-255
-        sat_diff = np.abs(roi_hsv[:, :, 1].astype(np.int16) - bg_hsv[:, :, 1].astype(np.int16))
-
-        # A pixel is anomalous if hue shifted meaningfully OR saturation shifted meaningfully.
-        # Pure brightness changes (shadow, lighting variation) are intentionally ignored.
-        anomaly = ((hue_diff > self._hue_threshold) |
-                   (sat_diff  > self._sat_threshold)).astype(np.uint8) * 255
-        anomaly[arm_roi > 0] = 0  # exclude arm pixels explicitly
-
-        # Morphological cleanup
-        ks = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        anomaly = cv2.morphologyEx(anomaly, cv2.MORPH_OPEN,  ks, iterations=1)
-        anomaly = cv2.morphologyEx(anomaly, cv2.MORPH_CLOSE, ks, iterations=2)
-
-        # Largest contour
-        contours, _ = cv2.findContours(anomaly, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        obstacle_blob = None
-        if contours:
-            largest = max(contours, key=cv2.contourArea)
-            area = float(cv2.contourArea(largest))
-            if area >= self._bg_obstacle_min_area:
-                bx, by, bw, bh = cv2.boundingRect(largest)
-                # Translate bbox back to full-frame coordinates
-                obstacle_blob = {'area': area, 'bbox': (bx + x1, by + y1, bw, bh)}
-
-        self._obstacle_present_now = obstacle_blob is not None
-        msg = Bool()
-        msg.data = self._obstacle_present_now
-        self._obstacle_present_pub.publish(msg)
-
-        # EMA background adaptation — gate ONLY on the wrist camera's collision_warning,
-        # NOT on our own obstacle_present_now. Gating on our own output causes a one-way
-        # trap: a false positive (e.g. shadow) sets obstacle_present_now=True, which
-        # blocks adaptation, which prevents the false trigger from being absorbed, which
-        # keeps obstacle_present_now=True permanently. Using the wrist camera's independent
-        # signal breaks this self-referential lockout: if the wrist says "no collision,"
-        # the overhead is allowed to slowly adapt regardless of its own current belief.
-        if not self._collision_warning:
-            cv2.accumulateWeighted(roi, self._bg_ref, self._bg_ema_alpha)
-
-        return obstacle_blob
-
-    def _annotate_frame(self, frame: np.ndarray, arm_blob, prop_blob, early_notice: bool,
-                        consistency_text: str) -> np.ndarray:
+    def _annotate_frame(self, frame: np.ndarray, arm_blob, prop_blob, gengar_blob,
+                        early_notice: bool, consistency_text: str) -> np.ndarray:
         annotated = frame.copy()
         frame_h, frame_w = annotated.shape[:2]
         roi_x1 = int(self._roi_x1 * frame_w)
@@ -630,22 +517,22 @@ class OverheadVisionNode(Node):
                 cv2.LINE_AA,
             )
 
-        cv2.rectangle(annotated, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 255, 255), 2)
-
-        # Draw bg-diff obstacle blob (orange box — distinct from blue prop box)
-        if self._bg_obstacle_blob is not None:
-            bx, by, bw, bh = self._bg_obstacle_blob['bbox']
-            cv2.rectangle(annotated, (bx, by), (bx + bw, by + bh), (0, 128, 255), 2)
+        # Gengar plushie — magenta bounding box (distinct from green arm, blue prop, yellow ROI)
+        if gengar_blob is not None:
+            gx, gy, gw, gh = gengar_blob['bbox']
+            cv2.rectangle(annotated, (gx, gy), (gx + gw, gy + gh), (255, 0, 255), 2)
             cv2.putText(
                 annotated,
-                'OBSTACLE',
-                (bx, max(20, by - 8)),
+                'GENGAR',
+                (gx, max(20, gy - 8)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
-                (0, 128, 255),
+                (255, 0, 255),
                 2,
                 cv2.LINE_AA,
             )
+
+        cv2.rectangle(annotated, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 255, 255), 2)
 
         if early_notice:
             cv2.putText(
