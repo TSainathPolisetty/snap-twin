@@ -11,32 +11,26 @@ grade: devel
 confinement: devmode
 
 plugs:
-  camera:
-    interface: camera
+  # TODO: Serial ports aren't deterministic -- how do we handle this?
   serial-port-leader:
     interface: serial-port
     path: /dev/ttyACM1
+
   serial-port-follower:
     interface: serial-port
     path: /dev/ttyACM0
-  opengl:
-    interface: opengl
-  wayland:
-    interface: wayland
+
   graphics-core22:
     interface: content
     target: $SNAP/graphics
     default-provider: mesa-core22
-  hardware-observe:
-    interface: hardware-observe
+
   system-files-tegra:
     interface: system-files
     read:
       - /usr/lib/aarch64-linux-gnu/tegra
       - /usr/lib/python3/dist-packages/tensorrt
       - /usr/src/tensorrt/bin
-  home:
-    interface: home
 
 apps:
   demo:
