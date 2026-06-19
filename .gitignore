@@ -8,3 +8,4 @@ log/
 models/
 snap/comments.txt
 .env
+*.snap

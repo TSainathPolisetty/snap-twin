@@ -67,7 +67,7 @@ apps:
     environment:
       # XXX: This might be a problem... something something SNAP_LIBRARY_PATH
       LD_LIBRARY_PATH: /usr/lib/aarch64-linux-gnu/tegra:$SNAP/graphics/lib:$LD_LIBRARY_PATH
-      PYTHONPATH: /usr/lib/python3/dist-packages:$PYTHONPATH
+      PYTHONPATH: $SNAP/usr/lib/python3/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH
       SNAP_TWIN_DATA_DIR: $SNAP_COMMON
       WAYLAND_DISPLAY: wayland-0
       QT_QPA_PLATFORM: wayland
@@ -101,7 +101,11 @@ parts:
     build-packages:
       - python3-pip
       - python3-dev
+    stage-packages:
+      - python3-packaging
     override-build: |
+      export CPATH="/usr/local/cuda/include:${CPATH:-}"
+      export LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:-}"
       pip3 install yourdfpy scipy PyYAML pycuda
       craftctl default
     after:
@@ -112,26 +116,39 @@ parts:
     source: .
     build-packages:
       - python3-pip
+    # NOTE: This part runs trtexec at build time. It requires JetPack 6.x
+    # with trtexec at /usr/src/tensorrt/bin/ on the BUILD machine itself.
+    # This is valid here because we build with --destructive-mode directly
+    # on the same Orin NX that runs the demo — build host == install target.
     override-build: |
       bash scripts/download_model.sh
       mkdir -p $SNAPCRAFT_PART_INSTALL/models
       mv models/depth_anything_v2_small.onnx \
         $SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.onnx
 
+      export LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}"
+      /usr/src/tensorrt/bin/trtexec \
+        --onnx=$SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.onnx \
+        --saveEngine=$SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.engine \
+        --fp16 \
+        --minShapes=pixel_values:1x3x518x518 \
+        --optShapes=pixel_values:1x3x518x518 \
+        --maxShapes=pixel_values:1x3x518x518 \
+        2>&1 | tee $SNAPCRAFT_PART_INSTALL/models/conversion.log
+
   share-assets:
     plugin: dump
     source: share/
 
   foxglove-bridge-bin:
-    plugin: nil
-    stage-snaps:
-      - foxglove-bridge/humble/stable
-    stage:
-      - opt/ros/snap/lib/foxglove_bridge/foxglove_bridge
-      - opt/ros/snap/lib/*.so*
-      - opt/ros/humble/lib/*.so*
+    plugin: dump
+    source: /snap/foxglove-bridge/current/opt/ros/snap/lib/foxglove_bridge
+    # stage:
+    #  - opt/ros/snap/lib/foxglove_bridge/foxglove_bridge
+    #  - opt/ros/snap/lib/*.so*
+    #  - opt/ros/humble/lib/*.so*
     organize:
-      opt/ros/snap/lib/foxglove_bridge/foxglove_bridge: bin/foxglove_bridge
+      foxglove_bridge: bin/foxglove_bridge
 
   scripts:
     plugin: dump

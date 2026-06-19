@@ -4,16 +4,16 @@
 # Runs as the snap-twin daemon; replaces start_gesture_demo.sh.
 set -e
 
-ENGINE="$SNAP_COMMON/models/depth_anything_v2_small.engine"
+ENGINE="$SNAP/models/depth_anything_v2_small.engine"
 URDF_SRC="$SNAP/final_twin.urdf"
 URDF_DEST="$SNAP_COMMON/final_twin.urdf"
 
-# ── Verify TRT engine exists (built by install hook) ──────────────────────────
+# ── Verify TRT engine exists (bundled in snap at build time) ──────────────────
 if [ ! -f "$ENGINE" ]; then
     echo "ERROR: TRT engine not found at $ENGINE"
-    echo "The install hook may have failed. Check:"
-    echo "  snap logs snap-twin --follow"
-    echo "  cat $SNAP_COMMON/models/conversion.log"
+    echo "The engine is built into the snap at snapcraft build time."
+    echo "This likely means the build failed during the onnx-model part."
+    echo "Rebuild with: sudo snapcraft pack --destructive-mode"
     exit 1
 fi
 
