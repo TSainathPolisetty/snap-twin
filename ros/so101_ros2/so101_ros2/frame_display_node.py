@@ -41,6 +41,18 @@ class MJPEGHandler(BaseHTTPRequestHandler):
     frame_event  = threading.Event()
 
     def do_GET(self):
+        if self.path == '/':
+            page = b'''<!DOCTYPE html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{margin:0;padding:0}body{background:#000;overflow:hidden}
+img{width:100vw;height:100vh;object-fit:contain}</style>
+</head><body><img src="/stream"></body></html>'''
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('Content-Length', len(page))
+            self.end_headers()
+            self.wfile.write(page)
+            return
         if self.path != '/stream':
             self.send_response(404)
             self.end_headers()
