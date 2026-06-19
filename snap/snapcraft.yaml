@@ -68,9 +68,11 @@ apps:
       LD_LIBRARY_PATH: /usr/lib/aarch64-linux-gnu/tegra:$SNAP/graphics/lib:$LD_LIBRARY_PATH
       # Explicit PYTHONPATH override: the extension's own PYTHONPATH is replaced when
       # the app sets this, so we must include everything we need in one entry:
-      #   1. content snap dist-packages → lark, packaging, netifaces (ros2launch deps)
-      #   2. host dist-packages         → tensorrt, pycuda (via system-files-tegra)
-      PYTHONPATH: $SNAP/opt/ros/underlay_ws/usr/lib/python3/dist-packages:/usr/lib/python3.10/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH
+      #   1. snap-staged pip packages    → deepdiff, pyserial, tqdm, yourdfpy, cv2
+      #   2. content snap dist-packages  → lark, packaging, netifaces (ros2launch deps)
+      #   3. host python3.10 dist-pkgs   → tensorrt, pycuda (via system-files-tegra)
+      #   4. host python3 dist-pkgs      → scipy, yaml fallback
+      PYTHONPATH: $SNAP/usr/lib/python3/dist-packages:$SNAP/opt/ros/underlay_ws/usr/lib/python3/dist-packages:/usr/lib/python3.10/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH
       SNAP_TWIN_DATA_DIR: $SNAP_COMMON
       WAYLAND_DISPLAY: wayland-0
       QT_QPA_PLATFORM: wayland
@@ -95,6 +97,8 @@ parts:
     build-packages:
       - python3-pip
       - python3-dev
+    stage-packages:
+      - python3-opencv
     override-build: |
       export CPATH="/usr/local/cuda/include:${CPATH:-}"
       export LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:-}"
