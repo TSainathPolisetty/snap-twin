@@ -1,0 +1,45 @@
+#!/bin/bash
+set -e
+
+ENGINE="$SNAP/models/depth_anything_v2_small.engine"
+URDF_SRC="$SNAP/final_twin.urdf"
+URDF_DEST="$SNAP_COMMON/final_twin.urdf"
+
+# ── Verify TRT engine exists (bundled in snap at build time) ──────────────────
+if [ ! -f "$ENGINE" ]; then
+    echo "ERROR: TRT engine not found at $ENGINE"
+    echo "The engine is built into the snap at snapcraft build time."
+    echo "This likely means the build failed during the onnx-model part."
+    echo "Rebuild with: sudo snapcraft pack --destructive-mode"
+    exit 1
+fi
+
+# ── Patch URDF with current machine IP (copy to writable $SNAP_COMMON) ────────
+MACHINE_IP=$(hostname -I | awk '{print $1}')
+if [ ! -f "$URDF_DEST" ] || ! grep -q "$MACHINE_IP" "$URDF_DEST"; then
+    echo "Patching URDF with IP $MACHINE_IP → $URDF_DEST"
+    cp "$URDF_SRC" "$URDF_DEST"
+    sed -i "s|http://[0-9.]*:8080|http://${MACHINE_IP}:8080|g" "$URDF_DEST"
+fi
+
+# ── Copy STL assets alongside patched URDF if not already there ───────────────
+if [ ! -d "$SNAP_COMMON/assets" ]; then
+    echo "Copying mesh assets to $SNAP_COMMON/assets/"
+    cp -r "$SNAP/assets" "$SNAP_COMMON/assets"
+fi
+
+if [ ! -d "$SNAP_COMMON/calibration" ]; then
+    echo "Copying calibration data to $SNAP_COMMON/calibration/"
+    cp -r "$SNAP/calibration" "$SNAP_COMMON/calibration"
+fi
+
+# ── Camera intrinsics (brio.yaml) — ROS convention: ~/.ros/camera_info/ ───────
+# overhead_vision_node uses os.path.expanduser('~/.ros/camera_info/brio.yaml').
+# When running as root, HOME=/root, so we copy to the right place.
+BRIO_SRC="$SNAP/calibration/brio.yaml"
+BRIO_DEST="$SNAP_USER_COMMON/.ros/camera_info/brio.yaml"
+if [ -f "$BRIO_SRC" ] && [ ! -f "$BRIO_DEST" ]; then
+    echo "Copying camera intrinsics to $BRIO_DEST"
+    mkdir -p "$(dirname "$BRIO_DEST")"
+    cp "$BRIO_SRC" "$BRIO_DEST"
+fi
