@@ -4,13 +4,13 @@ Split-view frame display node.
 Shows overhead annotated RGB on the left and wrist depth colormap on the right,
 with a three-state bottom banner driven by /arm_state (NORMAL / RETREATING / HOLDING).
 
-Serves frames as an MJPEG HTTP stream on port 8081 (configurable via mjpeg_port
-parameter). Point any browser or wpe-webkit-mir-kiosk at http://localhost:8081/stream.
-Display-protocol-agnostic: works identically on Desktop and Ubuntu Core.
+Renders fullscreen via cv2.imshow (GTK3 Wayland backend).
+On Desktop: connects to the GNOME Wayland session.
+On Ubuntu Core: connects to ubuntu-frame (the built-in Wayland compositor).
+Both paths use the snap's `wayland` plug — no separate kiosk snap needed.
 """
 
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import os
 
 import cv2
 import numpy as np
@@ -19,6 +19,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
+WINDOW_NAME   = 'Snap-Twin | Overhead + Wrist Monitor'
 BANNER_HEIGHT = 60
 
 # Banner colours (BGR)
@@ -34,76 +35,20 @@ _GOLD           = (0,   215, 255)  # spooked robot gold #FFD700
 _WHITE          = (255, 255, 255)
 
 
-class MJPEGHandler(BaseHTTPRequestHandler):
-    """Serves the latest composed frame as an MJPEG stream."""
-    latest_frame = None
-    frame_lock   = threading.Lock()
-    frame_event  = threading.Event()
-
-    def do_GET(self):
-        if self.path == '/':
-            page = b'''<!DOCTYPE html>
-<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>*{margin:0;padding:0}body{background:#000;overflow:hidden}
-img{width:100vw;height:100vh;object-fit:contain}</style>
-</head><body><img src="/stream"></body></html>'''
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
-            self.send_header('Content-Length', len(page))
-            self.end_headers()
-            self.wfile.write(page)
-            return
-        if self.path != '/stream':
-            self.send_response(404)
-            self.end_headers()
-            return
-
-        self.send_response(200)
-        self.send_header('Content-Type',
-                         'multipart/x-mixed-replace; boundary=frame')
-        self.end_headers()
-        try:
-            while True:
-                self.frame_event.wait(timeout=1.0)
-                self.frame_event.clear()
-                with self.frame_lock:
-                    frame = self.latest_frame
-                if frame is None:
-                    continue
-                ok, jpeg = cv2.imencode('.jpg', frame,
-                                        [cv2.IMWRITE_JPEG_QUALITY, 80])
-                if not ok:
-                    continue
-                data = jpeg.tobytes()
-                self.wfile.write(b'--frame\r\n')
-                self.wfile.write(b'Content-Type: image/jpeg\r\n')
-                self.wfile.write(f'Content-Length: {len(data)}\r\n'.encode())
-                self.wfile.write(b'\r\n')
-                self.wfile.write(data)
-                self.wfile.write(b'\r\n')
-        except (BrokenPipeError, ConnectionResetError):
-            pass  # Client disconnected — normal for MJPEG streams
-
-    def log_message(self, format, *args):
-        pass  # Suppress per-request logging (too noisy at 15 fps)
-
-
 class FrameDisplayNode(Node):
 
     def __init__(self):
         super().__init__('frame_display_node')
 
-        self.declare_parameter('mjpeg_port', 8081)
-        mjpeg_port = int(self.get_parameter('mjpeg_port').value)
+        self.declare_parameter('screen_width',  1920)
+        self.declare_parameter('screen_height', 1080)
+
+        self._win_w = int(self.get_parameter('screen_width').value)
+        self._win_h = int(self.get_parameter('screen_height').value)
 
         self._overhead  = None
         self._depth     = None
         self._arm_state = 'NORMAL'
-
-        # Canvas size — fixed 1280×480 (two 640-wide panels + banner).
-        # Browsers/kiosk scale to fit; no need to match screen resolution.
-        self._win_w = 1280
-        self._win_h = 480
 
         self.create_subscription(Image,  '/overhead/image_annotated',      self._overhead_cb,  5)
         self.create_subscription(Image,  '/camera/depth/visualization',    self._depth_cb,     5)
@@ -111,13 +56,18 @@ class FrameDisplayNode(Node):
 
         self.create_timer(1.0 / 15.0, self._display_cb)
 
-        self._http_server = HTTPServer(('0.0.0.0', mjpeg_port), MJPEGHandler)
-        self._http_thread = threading.Thread(
-            target=self._http_server.serve_forever,
-            daemon=True)
-        self._http_thread.start()
-        self.get_logger().info(
-            f'MJPEG stream available at http://0.0.0.0:{mjpeg_port}/stream')
+        self._has_display = False
+        try:
+            cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            self._has_display = True
+            self.get_logger().info(
+                f'FrameDisplayNode ready — fullscreen {self._win_w}x{self._win_h}')
+        except cv2.error as e:
+            self.get_logger().warn(
+                f'No display available ({e}); running headless. '
+                'Ensure the wayland plug is connected and WAYLAND_DISPLAY is set.'
+            )
 
     # ── subscriptions ──────────────────────────────────────────────────────────
 
@@ -135,6 +85,13 @@ class FrameDisplayNode(Node):
     # ── render loop ────────────────────────────────────────────────────────────
 
     def _display_cb(self):
+        if not self._has_display:
+            return
+        # Adapt to compositor-driven window resize (ubuntu-frame may resize us)
+        rect = cv2.getWindowImageRect(WINDOW_NAME)
+        if rect[2] > 0 and rect[3] > 0:
+            self._win_w, self._win_h = rect[2], rect[3]
+
         panel_w = self._win_w // 2
         panel_h = max(1, self._win_h - BANNER_HEIGHT)
 
@@ -143,9 +100,8 @@ class FrameDisplayNode(Node):
         banner = self._render_banner(self._win_w, BANNER_HEIGHT)
 
         canvas = np.vstack([np.hstack([left, right]), banner])
-        with MJPEGHandler.frame_lock:
-            MJPEGHandler.latest_frame = canvas.copy()
-        MJPEGHandler.frame_event.set()
+        cv2.imshow(WINDOW_NAME, canvas)
+        cv2.waitKey(1)
 
     def _render_panel(self, frame, width: int, height: int, label: str):
         if frame is None:
@@ -319,11 +275,17 @@ class FrameDisplayNode(Node):
     # ── cleanup ────────────────────────────────────────────────────────────────
 
     def destroy_node(self):
-        self._http_server.shutdown()
+        cv2.destroyAllWindows()
         super().destroy_node()
 
 
 def main(args=None):
+    # Force GTK3 to use the Wayland backend so cv2.imshow renders via Wayland.
+    # On Desktop: connects to GNOME/Wayland session.
+    # On Ubuntu Core: connects to ubuntu-frame (the built-in Wayland compositor).
+    # The snap's `wayland` plug provides access to $XDG_RUNTIME_DIR/wayland-0.
+    os.environ.setdefault('GDK_BACKEND', 'wayland')
+
     rclpy.init(args=args)
     node = FrameDisplayNode()
     try:

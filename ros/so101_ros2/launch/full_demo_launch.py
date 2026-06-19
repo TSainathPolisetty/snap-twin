@@ -7,8 +7,9 @@ Starts all seven nodes:
   gesture_node     idle animation + /gesture_active mux
   overhead_vision  HSV overhead segmentation on /dev/video0 — publishes /overhead/obstacle_present
   depth_anything   TRT depth inference on wrist camera (/dev/video2 by default)
-  frame_display    MJPEG HTTP stream server on port 8081 — http://localhost:8081/stream
-                   (started 5 s after launch)
+  frame_display    fullscreen Wayland window (cv2.imshow via GTK3 Wayland backend)
+                   connects to ubuntu-frame on Core, GNOME session on Desktop
+                 (started 5 s after launch)
   robot_state_pub  publishes /tf + /tf_static for Foxglove via foxglove-bridge snap
 
 Usage:
@@ -133,7 +134,8 @@ def generate_launch_description():
         name='frame_display_node',
         output='screen',
         parameters=[{
-            'mjpeg_port': 8081,
+            'screen_width':  1920,
+            'screen_height': 1080,
         }],
     )
 

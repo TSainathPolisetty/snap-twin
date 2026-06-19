@@ -37,7 +37,7 @@ fi
 # overhead_vision_node uses os.path.expanduser('~/.ros/camera_info/brio.yaml').
 # When running as root, HOME=/root, so we copy to the right place.
 BRIO_SRC="$SNAP/calibration/brio.yaml"
-BRIO_DEST="$SNAP_USER_COMMON/.ros/camera_info/brio.yaml"
+BRIO_DEST="$SNAP_USER_DATA/.ros/camera_info/brio.yaml"
 if [ -f "$BRIO_SRC" ] && [ ! -f "$BRIO_DEST" ]; then
     echo "Copying camera intrinsics to $BRIO_DEST"
     mkdir -p "$(dirname "$BRIO_DEST")"
