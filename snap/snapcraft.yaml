@@ -45,6 +45,9 @@ apps:
       - network-bind
     environment:
       LD_LIBRARY_PATH: $SNAP/usr/lib/tegra:$LD_LIBRARY_PATH
+      # GStreamer plugin discovery — staged plugins must be found at runtime
+      GST_PLUGIN_PATH: $SNAP/usr/lib/aarch64-linux-gnu/gstreamer-1.0
+      GST_PLUGIN_SCANNER: $SNAP/usr/lib/aarch64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner
       # Explicit PYTHONPATH override: the extension's own PYTHONPATH is replaced when
       # the app sets this, so we must include everything we need in one entry:
       #   1. snap-staged pip packages    → deepdiff, pyserial, tqdm, yourdfpy, cv2
@@ -78,6 +81,7 @@ parts:
       - python3-dev
     stage-packages:
       - python3-opencv
+      - gstreamer1.0-plugins-good   # provides v4l2src (needed for 1920×1080 camera pipeline)
     override-build: |
       export CPATH="/usr/local/cuda/include:${CPATH:-}"
       export LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:-}"

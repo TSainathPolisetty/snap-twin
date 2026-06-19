@@ -120,6 +120,11 @@ class DepthAnythingNode(Node):
                 f'GStreamer pipeline failed for {device} — trying plain VideoCapture')
             dev_index = int(device.replace('/dev/video', '')) if '/dev/video' in device else 0
             cap = cv2.VideoCapture(dev_index)
+            # Request 1920×1080 MJPEG on fallback so resolution matches the
+            # GStreamer pipeline (and the TRT engine's expected input quality).
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
         if not cap.isOpened():
             self.get_logger().error(f'Cannot open camera {device}')
