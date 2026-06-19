@@ -107,7 +107,7 @@ parts:
     override-build: |
       export CPATH="/usr/local/cuda/include:${CPATH:-}"
       export LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:-}"
-      pip3 install yourdfpy scipy PyYAML pycuda
+      pip3 install yourdfpy scipy PyYAML pycuda deepdiff pyserial tqdm
       craftctl default
     after:
       - onnx-model
