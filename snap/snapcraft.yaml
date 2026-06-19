@@ -8,7 +8,7 @@ description: |
   visualization. Requires JetPack 6.x on the target device.
 
 grade: devel
-confinement: devmode
+confinement: strict
 
 plugs:
   # TODO: Serial ports aren't deterministic -- how do we handle this?
@@ -29,8 +29,8 @@ plugs:
     interface: system-files
     read:
       - /usr/lib/aarch64-linux-gnu/tegra
-      - /usr/lib/python3/dist-packages/tensorrt
-      - /usr/src/tensorrt/bin
+      - /usr/lib/python3.10/dist-packages/tensorrt
+      - /usr/lib/python3.10/dist-packages/cv2
 
 layout:
   /usr/share/libdrm:
@@ -70,21 +70,12 @@ apps:
       # the app sets this, so we must include everything we need in one entry:
       #   1. content snap dist-packages → lark, packaging, netifaces (ros2launch deps)
       #   2. host dist-packages         → tensorrt, pycuda (via system-files-tegra)
-      PYTHONPATH: $SNAP/opt/ros/underlay_ws/usr/lib/python3/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH
+      PYTHONPATH: $SNAP/opt/ros/underlay_ws/usr/lib/python3/dist-packages:/usr/lib/python3.10/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH
       SNAP_TWIN_DATA_DIR: $SNAP_COMMON
       WAYLAND_DISPLAY: wayland-0
       QT_QPA_PLATFORM: wayland
       GDK_BACKEND: wayland
       DISPLAY: ""
-
-  foxglove-bridge:
-    command: bin/foxglove-wrapper
-    extensions: [ros2-humble-ros-base]
-    plugs:
-      - network
-      - network-bind
-    daemon: simple
-    restart-condition: on-failure
 
   asset-server:
     command: bin/asset_server.sh
@@ -107,7 +98,10 @@ parts:
     override-build: |
       export CPATH="/usr/local/cuda/include:${CPATH:-}"
       export LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:-}"
-      pip3 install yourdfpy scipy PyYAML pycuda deepdiff pyserial tqdm
+      pip3 install \
+      --target="$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages" \
+      --ignore-installed \
+      yourdfpy pycuda deepdiff pyserial tqdm
       craftctl default
     after:
       - onnx-model
@@ -140,16 +134,6 @@ parts:
   share-assets:
     plugin: dump
     source: share/
-
-  foxglove-bridge-bin:
-    plugin: dump
-    source: /snap/foxglove-bridge/current/opt/ros/snap/lib/foxglove_bridge
-    # stage:
-    #  - opt/ros/snap/lib/foxglove_bridge/foxglove_bridge
-    #  - opt/ros/snap/lib/*.so*
-    #  - opt/ros/humble/lib/*.so*
-    organize:
-      foxglove_bridge: bin/foxglove_bridge
 
   scripts:
     plugin: dump

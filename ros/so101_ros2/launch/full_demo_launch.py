@@ -133,8 +133,8 @@ def generate_launch_description():
         name='frame_display_node',
         output='screen',
         parameters=[{
-            'window_width':  1280,
-            'window_height': 540,
+            'screen_width':  1280,
+            'screen_height': 540,
         }],
     )
 

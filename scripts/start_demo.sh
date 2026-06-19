@@ -32,6 +32,18 @@ if [ ! -d "$SNAP_COMMON/assets" ]; then
     cp -r "$SNAP/assets" "$SNAP_COMMON/assets"
 fi
 
+if [ ! -d "$SNAP_COMMON/calibration" ]; then
+    echo "Copying calibration data to $SNAP_COMMON/calibration/"
+    cp -r "$SNAP/calibration" "$SNAP_COMMON/calibration"
+fi
+
+# ── Restart foxglove-bridge companion snap for fresh DDS discovery ────────────
+echo "Restarting foxglove-bridge snap service..."
+if command -v snap > /dev/null 2>&1; then
+    snap restart foxglove-bridge 2>/dev/null || \
+        echo "WARNING: foxglove-bridge snap not installed or not running"
+fi
+
 # ── Launch full demo ──────────────────────────────────────────────────────────
 exec ros2 launch so101_ros2 full_demo_launch.py \
     engine_path:="$ENGINE"
