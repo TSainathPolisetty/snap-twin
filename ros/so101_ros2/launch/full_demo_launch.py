@@ -134,8 +134,7 @@ def generate_launch_description():
         name='frame_display_node',
         output='screen',
         parameters=[{
-            'screen_width':  1920,
-            'screen_height': 1080,
+            'mjpeg_port': 8081,
         }],
     )
 

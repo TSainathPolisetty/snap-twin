@@ -30,7 +30,6 @@ apps:
       - wayland
     environment:
       LD_LIBRARY_PATH: $SNAP/usr/lib/tegra:$LD_LIBRARY_PATH
-      GDK_BACKEND: wayland
       # GStreamer plugin discovery — staged plugins must be found at runtime
       GST_PLUGIN_PATH: $SNAP/usr/lib/aarch64-linux-gnu/gstreamer-1.0
       GST_PLUGIN_SCANNER: $SNAP/usr/lib/aarch64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner
