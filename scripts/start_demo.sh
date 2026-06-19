@@ -55,8 +55,31 @@ if command -v snap > /dev/null 2>&1; then
         echo "WARNING: foxglove-bridge snap not installed or not running"
 fi
 
-# ── Launch full demo ──────────────────────────────────────────────────────────
+# ── Stop ubuntu-frame before launching — it holds DRM master on the Jetson GPU,
+#    which blocks CUDA initialization (cuInit → error 801/999) for any new
+#    process. We stop it here, let depth_anything initialize its CUDA/TRT
+#    context, then restart ubuntu-frame. An already-established CUDA context
+#    is not affected by DRM master being taken afterwards.
+echo "Stopping ubuntu-frame to free GPU for CUDA initialization..."
+snap stop ubuntu-frame 2>/dev/null || true
+
+# ── Launch full demo in background so we can restart ubuntu-frame after CUDA ──
 echo "MJPEG stream: http://localhost:8081/stream"
 echo "Point wpe-webkit-mir-kiosk or any browser at this URL"
-exec ros2 launch so101_ros2 full_demo_launch.py \
-    engine_path:="$ENGINE"
+ros2 launch so101_ros2 full_demo_launch.py \
+    engine_path:="$ENGINE" &
+ROS_PID=$!
+
+# Wait for depth_anything to load the TRT engine (~15-20 seconds on Orin NX).
+# After this, CUDA context is established and ubuntu-frame can safely take
+# DRM master without affecting the running inference.
+echo "Waiting for depth_anything TRT engine to initialize (~20s)..."
+sleep 20
+
+echo "Restarting ubuntu-frame and wpe-webkit-mir-kiosk..."
+snap start ubuntu-frame 2>/dev/null || true
+sleep 2
+snap start wpe-webkit-mir-kiosk 2>/dev/null || true
+
+# Stay alive until the ROS launch exits
+wait $ROS_PID
