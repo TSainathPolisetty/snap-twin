@@ -22,8 +22,6 @@ apps:
     extensions: [ros2-humble-ros-base]
     plugs:
       - camera
-      - serial-port-leader
-      - serial-port-follower
       - opengl
       - hardware-observe
       - home
