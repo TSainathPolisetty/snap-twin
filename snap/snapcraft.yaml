@@ -115,7 +115,7 @@ parts:
     override-build: |
       bash scripts/download_model.sh
       mkdir -p $SNAPCRAFT_PART_INSTALL/models
-      mv ~/models/depth_anything_v2_small.onnx \
+      mv models/depth_anything_v2_small.onnx \
         $SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.onnx
 
   share-assets:

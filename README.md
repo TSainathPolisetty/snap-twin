@@ -74,10 +74,10 @@ Calibration is saved to `so101_ros2/so101_ros2/config/`.
 
 **2. Download and convert the depth model** (first-time only):
 ```bash
-bash scripts/download_model.sh   # downloads ONNX to ~/models/
+bash scripts/download_model.sh   # downloads ONNX to models/ (repo-relative)
 bash scripts/convert_model.sh    # builds TensorRT engine (~8 min)
 ```
-Engine is saved to `~/models/depth_anything_v2_small.engine`.
+Engine is saved to `models/depth_anything_v2_small.engine` (repo-relative).
 
 ## Running
 

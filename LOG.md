@@ -20,4 +20,4 @@
 - [x] Leader → follower teleoperation working over `/joint_states`.
 - [x] Digital twin FK bridge streaming to Foxglove via custom WebSocket server.
 - [x] Gesture idle animation node integrated.
-- [x] Depth Anything V2 Small TensorRT fp16 engine built (`~/models/`).
+- [x] Depth Anything V2 Small TensorRT fp16 engine built (`models/` repo-relative).

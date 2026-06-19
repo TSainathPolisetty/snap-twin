@@ -166,7 +166,7 @@ sudo chmod a+rw /dev/ttyACM0 /dev/ttyACM1 2>/dev/null || true
 IDLE_TIMEOUT_FLOAT=$(python3 -c "print(float('$IDLE_TIMEOUT'))")
 ros2 launch so101_ros2 full_demo_launch.py \
     idle_timeout:="$IDLE_TIMEOUT_FLOAT" \
-    engine_path:=/home/ubuntu/models/depth_anything_v2_small.engine \
+    engine_path:="$REPO_ROOT/models/depth_anything_v2_small.engine" \
     ${TABLE_HEIGHT:+table_height_m:=$TABLE_HEIGHT}
 
 # (ros2 launch process manages all node lifecycles including robot_state_publisher)

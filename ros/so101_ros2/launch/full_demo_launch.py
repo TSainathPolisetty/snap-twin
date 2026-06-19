@@ -39,6 +39,12 @@ def generate_launch_description():
     with open(_urdf_path, 'r') as _f:
         _robot_description = _f.read()
 
+    _default_engine_dir = (
+        os.environ.get('SNAP_TWIN_DATA_DIR')
+        or os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'models'))
+    )
+    _default_engine_path = os.path.join(_default_engine_dir, 'depth_anything_v2_small.engine')
+
     idle_arg = DeclareLaunchArgument(
         'idle_timeout',
         default_value='15.0',
@@ -47,7 +53,7 @@ def generate_launch_description():
 
     engine_arg = DeclareLaunchArgument(
         'engine_path',
-        default_value='/home/ubuntu/models/depth_anything_v2_small.engine',
+        default_value=_default_engine_path,
         description='Path to TensorRT .engine file for Depth Anything V2',
     )
 

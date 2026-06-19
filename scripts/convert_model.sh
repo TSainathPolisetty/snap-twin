@@ -4,8 +4,10 @@
 
 set -e
 
-ONNX=~/models/depth_anything_v2_small.onnx
-ENGINE=~/models/depth_anything_v2_small.engine
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+ONNX="$REPO_ROOT/models/depth_anything_v2_small.onnx"
+ENGINE="$REPO_ROOT/models/depth_anything_v2_small.engine"
 
 if [ ! -f "$ONNX" ]; then
     echo "ONNX not found. Run scripts/download_model.sh first."
@@ -26,7 +28,7 @@ trtexec \
   --minShapes=pixel_values:1x3x518x518 \
   --optShapes=pixel_values:1x3x518x518 \
   --maxShapes=pixel_values:1x3x518x518 \
-  2>&1 | tee ~/models/conversion.log
+  2>&1 | tee "$REPO_ROOT/models/conversion.log"
 
 echo ""
 echo "Engine saved to $ENGINE"

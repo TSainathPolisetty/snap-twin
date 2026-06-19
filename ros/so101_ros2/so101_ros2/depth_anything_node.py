@@ -17,6 +17,7 @@ performance.  Upscaling to camera native (1920×1080) would produce ~14 MB
 messages and reduce frame rate to ~2.5 Hz.
 """
 
+import os
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
@@ -40,8 +41,12 @@ class DepthAnythingNode(Node):
         super().__init__('depth_anything_node')
 
         # ── Parameters ──────────────────────────────────────────────────────
-        self.declare_parameter('engine_path',
-                               '/home/ubuntu/models/depth_anything_v2_small.engine')
+        _default_engine_dir = (
+            os.environ.get('SNAP_TWIN_DATA_DIR')
+            or os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'models'))
+        )
+        _default_engine_path = os.path.join(_default_engine_dir, 'depth_anything_v2_small.engine')
+        self.declare_parameter('engine_path', _default_engine_path)
         self.declare_parameter('camera_device', '/dev/video0')
         self.declare_parameter('publish_width',  518)
         self.declare_parameter('publish_height', 518)
