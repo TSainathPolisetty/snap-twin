@@ -77,11 +77,12 @@ echo "Waiting for depth_anything TRT engine to initialize (~20s)..."
 sleep 20
 
 echo "Restarting ubuntu-frame and wpe-webkit-mir-kiosk..."
-# Point kiosk at '/' which serves the fullscreen HTML wrapper (not raw /stream)
-snap set wpe-webkit-mir-kiosk url=http://localhost:8081/ 2>/dev/null || true
 snap start ubuntu-frame 2>/dev/null || true
-sleep 2
+sleep 3
 snap start wpe-webkit-mir-kiosk 2>/dev/null || true
+sleep 1
+# Set URL after services are loaded — setting before causes 'not loaded' error
+snap set wpe-webkit-mir-kiosk url=http://localhost:8081/ 2>/dev/null || true
 
 # Stay alive until the ROS launch exits
 wait $ROS_PID
