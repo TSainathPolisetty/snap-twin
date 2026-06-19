@@ -65,7 +65,7 @@ apps:
       - network
       - network-bind
     environment:
-      LD_LIBRARY_PATH: /usr/lib/aarch64-linux-gnu/tegra:$SNAP/graphics/lib:$LD_LIBRARY_PATH
+      LD_LIBRARY_PATH: /usr/local/cuda-12.6/lib64:/usr/lib/aarch64-linux-gnu/tegra:$SNAP/graphics/lib:$LD_LIBRARY_PATH
       # Explicit PYTHONPATH override: the extension's own PYTHONPATH is replaced when
       # the app sets this, so we must include everything we need in one entry:
       #   1. snap-staged pip packages    → deepdiff, pyserial, tqdm, yourdfpy, cv2
@@ -103,9 +103,23 @@ parts:
       export CPATH="/usr/local/cuda/include:${CPATH:-}"
       export LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:-}"
       pip3 install \
-      --target="$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages" \
-      --ignore-installed \
-      yourdfpy pycuda deepdiff pyserial tqdm
+        --target="$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages" \
+        --ignore-installed \
+        yourdfpy pycuda deepdiff pyserial tqdm
+
+      # scservo_sdk: vendored Feetech servo SDK (not on PyPI, lives in repo)
+      cp -r vendor/scservo_sdk \
+        "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages/scservo_sdk"
+
+      # tensorrt: JetPack Python bindings at a host path that isn't reliably
+      # visible inside the snap; copy them in explicitly (destructive-mode only)
+      for pkg in tensorrt tensorrt_lean tensorrt_dispatch; do
+        if [ -d "/usr/lib/python3.10/dist-packages/$pkg" ]; then
+          cp -r "/usr/lib/python3.10/dist-packages/$pkg" \
+            "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages/$pkg"
+        fi
+      done
+
       craftctl default
     after:
       - onnx-model

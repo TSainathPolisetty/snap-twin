@@ -53,9 +53,17 @@ class FrameDisplayNode(Node):
 
         self.create_timer(1.0 / 15.0, self._display_cb)
 
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-        self.get_logger().info(f'FrameDisplayNode ready — fullscreen {self._win_w}x{self._win_h}')
+        self._has_display = False
+        try:
+            cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            self._has_display = True
+            self.get_logger().info(f'FrameDisplayNode ready — fullscreen {self._win_w}x{self._win_h}')
+        except cv2.error as e:
+            self.get_logger().warn(
+                f'No display available ({e}); running headless. '
+                'Connect a display or set DISPLAY/:WAYLAND_DISPLAY to enable the window.'
+            )
 
     # ── subscriptions ──────────────────────────────────────────────────────────
 
@@ -73,6 +81,8 @@ class FrameDisplayNode(Node):
     # ── render loop ────────────────────────────────────────────────────────────
 
     def _display_cb(self):
+        if not self._has_display:
+            return
         # Re-read window size each frame so we adapt if the compositor resizes us
         rect = cv2.getWindowImageRect(WINDOW_NAME)
         if rect[2] > 0 and rect[3] > 0:

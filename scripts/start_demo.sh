@@ -37,6 +37,17 @@ if [ ! -d "$SNAP_COMMON/calibration" ]; then
     cp -r "$SNAP/calibration" "$SNAP_COMMON/calibration"
 fi
 
+# ── Camera intrinsics (brio.yaml) — ROS convention: ~/.ros/camera_info/ ───────
+# overhead_vision_node uses os.path.expanduser('~/.ros/camera_info/brio.yaml').
+# When running as root, HOME=/root, so we copy to the right place.
+BRIO_SRC="$SNAP/calibration/brio.yaml"
+BRIO_DEST="$HOME/.ros/camera_info/brio.yaml"
+if [ -f "$BRIO_SRC" ] && [ ! -f "$BRIO_DEST" ]; then
+    echo "Copying camera intrinsics to $BRIO_DEST"
+    mkdir -p "$(dirname "$BRIO_DEST")"
+    cp "$BRIO_SRC" "$BRIO_DEST"
+fi
+
 # ── Restart foxglove-bridge companion snap for fresh DDS discovery ────────────
 echo "Restarting foxglove-bridge snap service..."
 if command -v snap > /dev/null 2>&1; then
