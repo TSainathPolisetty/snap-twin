@@ -65,7 +65,7 @@ apps:
       - network
       - network-bind
     environment:
-      LD_LIBRARY_PATH: /usr/local/cuda-12.6/lib64:/usr/lib/aarch64-linux-gnu/tegra:$SNAP/graphics/lib:$LD_LIBRARY_PATH
+      LD_LIBRARY_PATH: /usr/local/cuda-12.6/lib64:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/tegra:$SNAP/graphics/lib:$LD_LIBRARY_PATH
       # Explicit PYTHONPATH override: the extension's own PYTHONPATH is replaced when
       # the app sets this, so we must include everything we need in one entry:
       #   1. snap-staged pip packages    → deepdiff, pyserial, tqdm, yourdfpy, cv2
@@ -108,7 +108,7 @@ parts:
         yourdfpy pycuda deepdiff pyserial tqdm
 
       # scservo_sdk: vendored Feetech servo SDK (not on PyPI, lives in repo)
-      cp -r vendor/scservo_sdk \
+      cp -r $SNAPCRAFT_PART_SRC/vendor/scservo_sdk \
         "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages/scservo_sdk"
 
       # tensorrt: JetPack Python bindings at a host path that isn't reliably
