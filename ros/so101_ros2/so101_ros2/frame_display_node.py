@@ -276,13 +276,14 @@ class FrameDisplayNode(Node):
 
 
 def main(args=None):
-    # Wayland (ubuntu-frame): set backend hints before any GUI init.
-    # If WAYLAND_DISPLAY is set, use Wayland — do NOT force DISPLAY=:0.
-    if os.environ.get('WAYLAND_DISPLAY'):
-        os.environ.setdefault('GDK_BACKEND', 'wayland')
-        os.environ.setdefault('QT_QPA_PLATFORM', 'wayland')
-        os.environ.pop('DISPLAY', None)
-    elif not os.environ.get('DISPLAY'):
+    # Display setup for ubuntu-frame (XWayland + Wayland compositor):
+    #   - DISPLAY=:0  → ubuntu-frame's XWayland; cv2 GTK backend uses this
+    #   - WAYLAND_DISPLAY=wayland-0 → ubuntu-frame Wayland socket (set in snap env)
+    #
+    # cv2 GTK does NOT speak Wayland natively, so we always keep DISPLAY=:0
+    # for it. Qt/native-Wayland apps still use WAYLAND_DISPLAY normally.
+    # We do NOT pop DISPLAY when WAYLAND_DISPLAY is set — both coexist.
+    if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
         os.environ['DISPLAY'] = ':0'
 
     rclpy.init(args=args)

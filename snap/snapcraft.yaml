@@ -58,6 +58,7 @@ apps:
       - serial-port-follower
       - opengl
       - wayland
+      - x11
       - graphics-core22
       - hardware-observe
       - system-files-tegra
@@ -76,8 +77,10 @@ apps:
       SNAP_TWIN_DATA_DIR: $SNAP_COMMON
       WAYLAND_DISPLAY: wayland-0
       QT_QPA_PLATFORM: wayland
-      GDK_BACKEND: wayland
-      DISPLAY: ""
+      # DISPLAY=:0 → ubuntu-frame's XWayland compositor.
+      # cv2 GTK backend uses X11 (not Wayland-native), so XWayland is required.
+      # Connect with: snap connect snap-twin:x11 ubuntu-frame:x11
+      DISPLAY: ":0"
 
   asset-server:
     command: bin/asset_server.sh
