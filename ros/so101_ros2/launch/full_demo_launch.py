@@ -7,7 +7,7 @@ Starts all seven nodes:
   gesture_node     idle animation + /gesture_active mux
   overhead_vision  HSV overhead segmentation on /dev/video0 — publishes /overhead/obstacle_present
   depth_anything   TRT depth inference on wrist camera (/dev/video2 by default)
-  frame_display    OpenCV split view for overhead + wrist depth
+  frame_display    MJPEG HTTP stream server on port 8081 — http://localhost:8081/stream
                    (started 5 s after launch)
   robot_state_pub  publishes /tf + /tf_static for Foxglove via foxglove-bridge snap
 
@@ -133,8 +133,7 @@ def generate_launch_description():
         name='frame_display_node',
         output='screen',
         parameters=[{
-            'screen_width':  1280,
-            'screen_height': 540,
+            'mjpeg_port': 8081,
         }],
     )
 

@@ -56,5 +56,7 @@ if command -v snap > /dev/null 2>&1; then
 fi
 
 # ── Launch full demo ──────────────────────────────────────────────────────────
+echo "MJPEG stream: http://localhost:8081/stream"
+echo "Point wpe-webkit-mir-kiosk or any browser at this URL"
 exec ros2 launch so101_ros2 full_demo_launch.py \
     engine_path:="$ENGINE"

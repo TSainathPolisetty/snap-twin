@@ -6,6 +6,8 @@ description: |
   ROS2 Humble demo for Jetson Orin NX: leader/follower SO-101 arms,
   overhead Gengar detection, depth inference with TensorRT, Foxglove
   visualization. Requires JetPack 6.x on the target device.
+  Display served as MJPEG stream on port 8081 — point wpe-webkit-mir-kiosk
+  or any browser at http://localhost:8081/stream.
 
 grade: devel
 confinement: strict
@@ -20,54 +22,29 @@ plugs:
     interface: serial-port
     path: /dev/ttyACM0
 
-  graphics-core22:
-    interface: content
-    target: $SNAP/graphics
-    default-provider: mesa-core22
-
   system-files-tegra:
     interface: system-files
     read:
       - /usr/lib/aarch64-linux-gnu/tegra
-      - /usr/lib/aarch64-linux-gnu
       - /usr/lib/python3.10/dist-packages/tensorrt
       - /usr/lib/python3.10/dist-packages/cv2
-
-layout:
-  /usr/share/libdrm:
-    bind: $SNAP/graphics/libdrm
-
-  /usr/share/drirc.d:
-    symlink: $SNAP/graphics/drirc.d
-
-  /usr/share/X11/XErrorDB:
-    symlink: $SNAP/graphics/X11/XErrorDB
-
-  /usr/share/X11/locale:
-    symlink: $SNAP/graphics/X11/locale
 
 apps:
   demo:
     command: bin/start_demo.sh
-    # XXX: This extension is experimental!
     extensions: [ros2-humble-ros-base]
-    command-chain:
-      - bin/graphics-core22-wrapper
     plugs:
       - camera
       - serial-port-leader
       - serial-port-follower
       - opengl
-      - wayland
-      - x11
-      - graphics-core22
       - hardware-observe
       - system-files-tegra
       - home
       - network
       - network-bind
     environment:
-      LD_LIBRARY_PATH: $SNAP/usr/lib/tegra-nv:/usr/local/cuda-12.6/lib64:/usr/lib/aarch64-linux-gnu/tegra:$SNAP/graphics/lib:$LD_LIBRARY_PATH
+      LD_LIBRARY_PATH: $SNAP/usr/lib/tegra:$LD_LIBRARY_PATH
       # Explicit PYTHONPATH override: the extension's own PYTHONPATH is replaced when
       # the app sets this, so we must include everything we need in one entry:
       #   1. snap-staged pip packages    → deepdiff, pyserial, tqdm, yourdfpy, cv2
@@ -76,12 +53,6 @@ apps:
       #   4. host python3 dist-pkgs      → scipy, yaml fallback
       PYTHONPATH: $SNAP/usr/lib/python3/dist-packages:$SNAP/opt/ros/underlay_ws/usr/lib/python3/dist-packages:/usr/lib/python3.10/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH
       SNAP_TWIN_DATA_DIR: $SNAP_COMMON
-      WAYLAND_DISPLAY: wayland-0
-      QT_QPA_PLATFORM: wayland
-      # DISPLAY=:0 → ubuntu-frame's XWayland compositor.
-      # cv2 GTK backend uses X11 (not Wayland-native), so XWayland is required.
-      # Connect with: snap connect snap-twin:x11 ubuntu-frame:x11
-      DISPLAY: ":0"
 
   asset-server:
     command: bin/asset_server.sh
@@ -124,13 +95,13 @@ parts:
         fi
       done
 
-      # Stage NVIDIA runtime .so files into the snap.
+      # Stage NVIDIA TensorRT runtime .so files from host.
       # CRITICAL: system-files plug only adjusts AppArmor policy — it does NOT
       # make host paths visible in the snap's mount namespace. Files at
-      # /usr/lib/aarch64-linux-gnu/libnvinfer* are invisible inside the snap
-      # at runtime. We must copy them in at build time (destructive-mode only,
+      # /lib/aarch64-linux-gnu/libnvinfer* are invisible inside the snap at
+      # runtime. We must copy them in at build time (destructive-mode only,
       # build host == install target on this Orin NX).
-      NVDEST="$SNAPCRAFT_PART_INSTALL/usr/lib/tegra-nv"
+      NVDEST="$SNAPCRAFT_PART_INSTALL/usr/lib/tegra"
       mkdir -p "$NVDEST"
 
       # TRT core libs (versioned .so files + .so.10 / .so symlinks)
@@ -211,14 +182,3 @@ parts:
     source: scripts/
     organize:
       "*": bin/
-
-  graphics-core22:
-    after:
-      - so101-ros2
-    source: https://github.com/canonical/gpu-snap.git
-    plugin: dump
-    override-prime: | 
-      craftctl default
-      ${CRAFT_PART_SRC}/bin/graphics-core22-cleanup mesa-core22 nvidia-core22
-    prime:
-      - bin/graphics-core22-wrapper
