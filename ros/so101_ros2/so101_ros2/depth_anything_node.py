@@ -108,27 +108,20 @@ class DepthAnythingNode(Node):
         self.get_logger().info('TRT engine loaded — buffers allocated')
 
     def _open_camera(self, device: str):
-        """Open camera via GStreamer MJPG pipeline; fall back to plain VideoCapture.
+        """Open wrist camera via V4L2 directly (no GStreamer MMAP buffer leak).
 
-        The wrist camera only needs to feed the TRT model (518×518 input), so
-        640×480 @ 15 fps is plenty — much lower USB2.0 bandwidth than 1920×1080.
+        GStreamer io-mode=mmap leaks kernel DMA buffers on each failed pipeline
+        teardown, eventually causing 'Failed to allocate required memory' after
+        a few reconnect cycles.  cv2.CAP_V4L2 releases buffers cleanly on cap.release().
+        640×480 @ 15 fps is sufficient — TRT resizes to 518×518 anyway.
         """
-        gst_pipeline = (
-            f'v4l2src device={device} io-mode=mmap ! '
-            'image/jpeg,width=640,height=480,framerate=15/1 ! '
-            'jpegdec ! videoconvert ! '
-            'appsink drop=true max-buffers=1'
-        )
-        cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
-
-        if not cap.isOpened():
-            self.get_logger().warn(
-                f'GStreamer pipeline failed for {device} — trying plain VideoCapture')
-            cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
+        cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
+        if cap.isOpened():
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 15)
+            cap.set(cv2.CAP_PROP_FPS,          15)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)   # don't queue stale frames
 
         if not cap.isOpened():
             self.get_logger().error(f'Cannot open camera {device}')
@@ -137,8 +130,13 @@ class DepthAnythingNode(Node):
 
         # Warm up: one frame read to confirm pipeline is live
         ret, frame = cap.read()
-        cam_h, cam_w = (frame.shape[:2] if ret else (1080, 1920))
+        if not ret:
+            self.get_logger().error(f'Camera opened but first read failed: {device}')
+            cap.release()
+            self._cap = None
+            return
 
+        cam_h, cam_w = frame.shape[:2]
         self._cap = cap
         self.get_logger().info(
             f'Camera opened: {cam_w}×{cam_h}  →  publishing at {self._pub_w}×{self._pub_h}'
