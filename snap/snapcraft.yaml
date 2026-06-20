@@ -16,6 +16,10 @@ hooks:
   install:
     plugs: [network-observe]
 
+layout:
+  /usr/lib/aarch64-linux-gnu/nvidia:
+    bind: $SNAP/usr/lib/tegra
+
 apps:
   demo:
     command: bin/start_demo.sh
@@ -66,9 +70,12 @@ parts:
     override-build: |
       export CPATH="/usr/local/cuda/include:${CPATH:-}"
       export LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:-}"
+
       pip3 install \
         --target="$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages" \
         --ignore-installed \
+        --no-cache-dir \
+        "numpy==1.26.4" \
         yourdfpy pycuda deepdiff pyserial tqdm
 
       # scservo_sdk: vendored Feetech servo SDK (not on PyPI, lives in repo)
@@ -116,6 +123,26 @@ parts:
       ln -sf libcuda.so.1.1 "$NVDEST/libcuda.so.1"
       ln -sf libcuda.so.1   "$NVDEST/libcuda.so"
 
+      # libcuda dlopen()s libnvcucompat.so during cuInit on JetPack 6.x.
+      # Host LD_DEBUG shows it resolving from /lib/aarch64-linux-gnu/libnvcucompat.so.
+      # Important: /lib/aarch64-linux-gnu/libnvcucompat.so may itself be a symlink,
+      # so resolve it and copy the real file into the snap.
+      for src in \
+        /lib/aarch64-linux-gnu/libnvcucompat.so \
+        /usr/lib/aarch64-linux-gnu/libnvcucompat.so \
+        /usr/lib/aarch64-linux-gnu/nvidia/libnvcucompat.so; do
+        if [ -e "$src" ]; then
+          real_src="$(readlink -f "$src")"
+          echo "Staging libnvcucompat.so from $src -> $real_src"
+          rm -f "$NVDEST/libnvcucompat.so"
+          install -Dm644 "$real_src" "$NVDEST/libnvcucompat.so"
+          break
+        fi
+      done
+
+      [ -f "$NVDEST/libnvcucompat.so" ] || \
+        echo "WARNING: libnvcucompat.so not found — cuInit may fail with 999"
+
       # libcudla from CUDA toolkit (TRT transitive dep)
       [ -f /usr/local/cuda-12.6/lib64/libcudla.so.1 ] && \
         cp /usr/local/cuda-12.6/lib64/libcudla.so.1 "$NVDEST/"
@@ -124,7 +151,7 @@ parts:
       [ -f /usr/local/cuda-12.6/lib64/libcurand.so.10 ] && \
         cp /usr/local/cuda-12.6/lib64/libcurand.so.10 "$NVDEST/"
 
-      # Tegra kernel-interface support libs (libnvinfer transitive deps)
+      # Tegra kernel-interface support libs (libcuda/TRT transitive deps)
       for lib in libnvos.so libnvrm_chip.so libnvrm_gpu.so libnvrm_host1x.so \
                  libnvrm_mem.so libnvrm_sync.so libnvsciipc.so libnvsocsys.so \
                  libnvtegrahv.so libnvdla_compiler.so libnvdla_runtime.so; do
