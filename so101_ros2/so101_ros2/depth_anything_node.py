@@ -59,6 +59,8 @@ class DepthAnythingNode(Node):
         self._load_engine(engine_path)
 
         # ── Camera ──────────────────────────────────────────────────────────
+        self._camera_device = camera_device
+        self._last_cam_fail  = 0.0          # monotonic time of last open attempt
         self.get_logger().info(f'Opening camera: {camera_device}')
         self._open_camera(camera_device)
 
@@ -113,8 +115,7 @@ class DepthAnythingNode(Node):
         if not cap.isOpened():
             self.get_logger().warn(
                 f'GStreamer pipeline failed for {device} — trying plain VideoCapture')
-            dev_index = int(device.replace('/dev/video', '')) if '/dev/video' in device else 0
-            cap = cv2.VideoCapture(dev_index)
+            cap = cv2.VideoCapture(device)
 
         if not cap.isOpened():
             self.get_logger().error(f'Cannot open camera {device}')
@@ -129,6 +130,21 @@ class DepthAnythingNode(Node):
         self.get_logger().info(
             f'Camera opened: {cam_w}×{cam_h}  →  publishing at {self._pub_w}×{self._pub_h}'
         )
+
+    def _reconnect_camera(self):
+        """Release dead capture handle and reopen — called after read failures."""
+        import time
+        now = time.monotonic()
+        if now - self._last_cam_fail < 5.0:
+            return  # cooldown: don't spam reopen attempts
+        self._last_cam_fail = now
+
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
+
+        self.get_logger().warn(f'Camera lost — attempting reconnect: {self._camera_device}')
+        self._open_camera(self._camera_device)
 
     # ────────────────────────────────────────────────────────────────────────
     # Preprocessing / inference
@@ -159,11 +175,13 @@ class DepthAnythingNode(Node):
     def _timer_cb(self):
         if self._cap is None or not self._cap.isOpened():
             self.get_logger().warn('Camera unavailable — skipping frame', throttle_duration_sec=5.0)
+            self._reconnect_camera()
             return
 
         ret, frame = self._cap.read()
         if not ret or frame is None:
-            self.get_logger().warn('Camera read failed — skipping frame', throttle_duration_sec=2.0)
+            self.get_logger().warn('Camera read failed — reconnecting', throttle_duration_sec=2.0)
+            self._reconnect_camera()
             return
 
         # ── Inference ────────────────────────────────────────────────────────
