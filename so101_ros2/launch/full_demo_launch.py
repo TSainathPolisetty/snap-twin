@@ -6,7 +6,7 @@ Starts all seven nodes:
   follower         so101_ros2_sub   /dev/ttyACM0 — state machine driven by /overhead/obstacle_present
   gesture_node     idle animation + /gesture_active mux
   overhead_vision  HSV overhead segmentation on Brio 101 (by-id) — publishes /overhead/obstacle_present
-  depth_anything   TRT depth inference on wrist camera USB2.0_CAM1 index1 (by-id, stable across reboots)
+  depth_anything   TRT depth inference on wrist camera USB2.0_CAM1 index0 (by-id, stable across reboots)
   frame_display    OpenCV split view for overhead + wrist depth
                    (started 5 s after launch)
   robot_state_pub  publishes /tf + /tf_static for Foxglove via foxglove-bridge snap
@@ -49,8 +49,8 @@ def generate_launch_description():
 
     camera_arg = DeclareLaunchArgument(
         'camera_device',
-        default_value='/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB2.0_CAM1_USB2.0_CAM1-video-index1',
-        description='Wrist depth camera — stable by-id symlink (index1 = video stream, index0 = metadata)',
+        default_value='/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB2.0_CAM1_USB2.0_CAM1-video-index0',
+        description='Wrist depth camera — stable by-id symlink (index0 = video stream)',
     )
 
     table_height_arg = DeclareLaunchArgument(
