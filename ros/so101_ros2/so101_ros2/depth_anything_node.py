@@ -108,10 +108,14 @@ class DepthAnythingNode(Node):
         self.get_logger().info('TRT engine loaded — buffers allocated')
 
     def _open_camera(self, device: str):
-        """Open camera via GStreamer MJPG pipeline; fall back to plain VideoCapture."""
+        """Open camera via GStreamer MJPG pipeline; fall back to plain VideoCapture.
+
+        The wrist camera only needs to feed the TRT model (518×518 input), so
+        640×480 @ 15 fps is plenty — much lower USB2.0 bandwidth than 1920×1080.
+        """
         gst_pipeline = (
             f'v4l2src device={device} io-mode=mmap ! '
-            'image/jpeg,width=1920,height=1080,framerate=30/1 ! '
+            'image/jpeg,width=640,height=480,framerate=15/1 ! '
             'jpegdec ! videoconvert ! '
             'appsink drop=true max-buffers=1'
         )
@@ -120,12 +124,11 @@ class DepthAnythingNode(Node):
         if not cap.isOpened():
             self.get_logger().warn(
                 f'GStreamer pipeline failed for {device} — trying plain VideoCapture')
-            cap = cv2.VideoCapture(device)
-            # Request 1920×1080 MJPEG on fallback so resolution matches the
-            # GStreamer pipeline (and the TRT engine's expected input quality).
+            cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 15)
 
         if not cap.isOpened():
             self.get_logger().error(f'Cannot open camera {device}')
