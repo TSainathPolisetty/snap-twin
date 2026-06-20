@@ -4,5 +4,8 @@
 # Runs as the snap-twin daemon; replaces start_gesture_demo.sh.
 set -e
 
+# ── Restart foxglove-bridge companion snap for fresh DDS discovery ────────────
+snap restart foxglove-bridge 2>/dev/null || true
+
 ros2 launch so101_ros2 full_demo_launch.py \
     engine_path:="$SNAP/models/depth_anything_v2_small.engine"

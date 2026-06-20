@@ -5,8 +5,8 @@ Starts all seven nodes:
   leader           so101_ros2_pub   /dev/ttyACM1
   follower         so101_ros2_sub   /dev/ttyACM0 — state machine driven by /overhead/obstacle_present
   gesture_node     idle animation + /gesture_active mux
-  overhead_vision  HSV overhead segmentation on /dev/video0 — publishes /overhead/obstacle_present
-  depth_anything   TRT depth inference on wrist camera (/dev/video2 by default)
+  overhead_vision  HSV overhead segmentation on Brio 101 (by-id) — publishes /overhead/obstacle_present
+  depth_anything   TRT depth inference on wrist camera USB2.0_CAM1 index0 (by-id, stable across reboots)
   frame_display    fullscreen Wayland window (cv2.imshow via GTK3 Wayland backend)
                    connects to ubuntu-frame on Core, GNOME session on Desktop
                  (started 5 s after launch)
@@ -60,8 +60,8 @@ def generate_launch_description():
 
     camera_arg = DeclareLaunchArgument(
         'camera_device',
-        default_value='/dev/video2',
-        description='Wrist depth camera device path (default /dev/video2)',
+        default_value='/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB2.0_CAM1_USB2.0_CAM1-video-index0',
+        description='Wrist depth camera — stable by-id symlink (index0 = video stream)',
     )
 
     table_height_arg = DeclareLaunchArgument(
@@ -112,7 +112,7 @@ def generate_launch_description():
         name='overhead_vision_node',
         output='screen',
         parameters=[{
-            'camera_device': '/dev/video0',
+            'camera_device': '/dev/v4l/by-id/usb-046d_Brio_101_2513APMG7JT8-video-index0',
             'table_height_m': LaunchConfiguration('table_height_m'),
         }],
     )

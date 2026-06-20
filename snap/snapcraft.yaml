@@ -39,11 +39,14 @@ apps:
       GST_PLUGIN_SCANNER: $SNAP/usr/lib/aarch64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner
       # Explicit PYTHONPATH override: the extension's own PYTHONPATH is replaced when
       # the app sets this, so we must include everything we need in one entry:
-      #   1. snap-staged pip packages    → deepdiff, pyserial, tqdm, yourdfpy, cv2
-      #   2. content snap dist-packages  → lark, packaging, netifaces (ros2launch deps)
-      #   3. host python3.10 dist-pkgs   → tensorrt, pycuda (via system-files-tegra)
-      #   4. host python3 dist-pkgs      → scipy, yaml fallback
-      PYTHONPATH: $SNAP/usr/lib/python3/dist-packages:$SNAP/opt/ros/underlay_ws/usr/lib/python3/dist-packages:/usr/lib/python3.10/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH
+      #   1. snap private pip site-packages → numpy 1.26.4, pycuda, deepdiff, tqdm, yourdfpy
+      #      (put first so numpy 1.26.4 wins over apt's old numpy 1.21.5 in dist-packages)
+      #   2. snap-staged dist-packages      → cv2 and apt-staged Python packages
+      #   3. content snap dist-packages     → lark, packaging, netifaces (ros2launch deps)
+      #   4. host python3.10 dist-pkgs      → tensorrt, pycuda (via system-files-tegra)
+      #   5. host python3 dist-pkgs         → scipy, yaml fallback
+      PYTHONPATH: $SNAP/usr/lib/python3.10/site-packages:$SNAP/usr/lib/python3/dist-packages:$SNAP/opt/ros/underlay_ws/usr/lib/python3/dist-packages:/usr/lib/python3.10/dist-packages:/usr/lib/python3/dist-packages:$PYTHONPATH
+
       SNAP_TWIN_DATA_DIR: $SNAP_COMMON
 
   asset-server:
@@ -71,23 +74,33 @@ parts:
       export CPATH="/usr/local/cuda/include:${CPATH:-}"
       export LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:-}"
 
+      # Keep pip-installed Python packages separate from apt/stage-packages.
+      # python3-opencv pulls Ubuntu's old numpy 1.21.5 into dist-packages, but
+      # pycuda 2026.x requires numpy ≥ 1.22 (uses np.dtype[Any] generic syntax).
+      # Install pip packages into a private site-packages dir and put that first
+      # in PYTHONPATH so numpy 1.26.4 wins at runtime.
+      PIPDEST="$SNAPCRAFT_PART_INSTALL/usr/lib/python3.10/site-packages"
+      mkdir -p "$PIPDEST"
+
       pip3 install \
-        --target="$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages" \
+        --target="$PIPDEST" \
         --ignore-installed \
         --no-cache-dir \
         "numpy==1.26.4" \
         yourdfpy pycuda deepdiff pyserial tqdm
 
       # scservo_sdk: vendored Feetech servo SDK (not on PyPI, lives in repo)
-      cp -r $SNAPCRAFT_PART_SRC/vendor/scservo_sdk \
-        "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages/scservo_sdk"
+      cp -r "$SNAPCRAFT_PART_SRC/vendor/scservo_sdk" \
+        "$PIPDEST/scservo_sdk"
 
       # tensorrt: JetPack Python bindings at a host path that isn't reliably
       # visible inside the snap; copy them in explicitly (destructive-mode only)
       for pkg in tensorrt tensorrt_lean tensorrt_dispatch; do
         if [ -d "/usr/lib/python3.10/dist-packages/$pkg" ]; then
           cp -r "/usr/lib/python3.10/dist-packages/$pkg" \
-            "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages/$pkg"
+            "$PIPDEST/$pkg"
+        else
+          echo "WARNING: /usr/lib/python3.10/dist-packages/$pkg not found"
         fi
       done
 
@@ -144,20 +157,29 @@ parts:
         echo "WARNING: libnvcucompat.so not found — cuInit may fail with 999"
 
       # libcudla from CUDA toolkit (TRT transitive dep)
-      [ -f /usr/local/cuda-12.6/lib64/libcudla.so.1 ] && \
+      if [ -f /usr/local/cuda-12.6/lib64/libcudla.so.1 ]; then
         cp /usr/local/cuda-12.6/lib64/libcudla.so.1 "$NVDEST/"
+      else
+        echo "WARNING: libcudla.so.1 not found"
+      fi
 
       # libcurand (pycuda dep)
-      [ -f /usr/local/cuda-12.6/lib64/libcurand.so.10 ] && \
+      if [ -f /usr/local/cuda-12.6/lib64/libcurand.so.10 ]; then
         cp /usr/local/cuda-12.6/lib64/libcurand.so.10 "$NVDEST/"
+      else
+        echo "WARNING: libcurand.so.10 not found"
+      fi
 
       # Tegra kernel-interface support libs (libcuda/TRT transitive deps)
       for lib in libnvos.so libnvrm_chip.so libnvrm_gpu.so libnvrm_host1x.so \
                  libnvrm_mem.so libnvrm_sync.so libnvsciipc.so libnvsocsys.so \
                  libnvtegrahv.so libnvdla_compiler.so libnvdla_runtime.so; do
         src="/usr/lib/aarch64-linux-gnu/nvidia/$lib"
-        [ -f "$src" ] && cp "$src" "$NVDEST/" || \
+        if [ -f "$src" ]; then
+          cp "$src" "$NVDEST/"
+        else
           echo "WARNING: $src not found"
+        fi
       done
 
       craftctl default
@@ -175,19 +197,21 @@ parts:
     # on the same Orin NX that runs the demo — build host == install target.
     override-build: |
       bash scripts/download_model.sh
-      mkdir -p $SNAPCRAFT_PART_INSTALL/models
+
+      mkdir -p "$SNAPCRAFT_PART_INSTALL/models"
       mv models/depth_anything_v2_small.onnx \
-        $SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.onnx
+        "$SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.onnx"
 
       export LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}"
+
       /usr/src/tensorrt/bin/trtexec \
-        --onnx=$SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.onnx \
-        --saveEngine=$SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.engine \
+        --onnx="$SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.onnx" \
+        --saveEngine="$SNAPCRAFT_PART_INSTALL/models/depth_anything_v2_small.engine" \
         --fp16 \
         --minShapes=pixel_values:1x3x518x518 \
         --optShapes=pixel_values:1x3x518x518 \
         --maxShapes=pixel_values:1x3x518x518 \
-        2>&1 | tee $SNAPCRAFT_PART_INSTALL/models/conversion.log
+        2>&1 | tee "$SNAPCRAFT_PART_INSTALL/models/conversion.log"
 
   share-assets:
     plugin: dump

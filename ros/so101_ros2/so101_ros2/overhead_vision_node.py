@@ -62,7 +62,7 @@ class OverheadVisionNode(Node):
         # tune gengar_hue_low/high on-site if detection is poor or noisy.
         # OpenCV HSV: hue 0-180 (purple ≈ 120-150), sat/val 0-255.
         # All gengar_* params support live tuning via `ros2 param set`.
-        self.declare_parameter('gengar_hue_low',  125)
+        self.declare_parameter('gengar_hue_low',  120)
         self.declare_parameter('gengar_hue_high', 155)
         self.declare_parameter('gengar_sat_low',   50)
         self.declare_parameter('gengar_sat_high', 255)
